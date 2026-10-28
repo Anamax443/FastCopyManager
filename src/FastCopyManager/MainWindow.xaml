@@ -1,0 +1,54 @@
+<Window x:Class="FastCopyManager.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FastCopyManager" Height="420" Width="680" MinWidth="560"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+
+        <TextBlock Grid.Row="0" Text="FastCopy.exe" VerticalAlignment="Center" Margin="0,0,12,8"/>
+        <TextBox Grid.Row="0" Grid.Column="1" x:Name="ExeBox" Margin="0,0,8,8"/>
+        <Button Grid.Row="0" Grid.Column="2" Content="..." Width="32" Margin="0,0,0,8" Click="BrowseExe_Click"/>
+
+        <TextBlock Grid.Row="1" Text="Zdroj" VerticalAlignment="Center" Margin="0,0,12,8"/>
+        <TextBox Grid.Row="1" Grid.Column="1" x:Name="SourceBox" Margin="0,0,8,8"/>
+        <Button Grid.Row="1" Grid.Column="2" Content="..." Width="32" Margin="0,0,0,8" Click="BrowseSource_Click"/>
+
+        <TextBlock Grid.Row="2" Text="Cíl" VerticalAlignment="Center" Margin="0,0,12,8"/>
+        <TextBox Grid.Row="2" Grid.Column="1" x:Name="TargetBox" Margin="0,0,8,8"/>
+        <Button Grid.Row="2" Grid.Column="2" Content="..." Width="32" Margin="0,0,0,8" Click="BrowseTarget_Click"/>
+
+        <TextBlock Grid.Row="3" Text="Režim" VerticalAlignment="Center" Margin="0,0,12,8"/>
+        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+            <ComboBox x:Name="ModeBox" Width="220" SelectedIndex="0">
+                <ComboBoxItem Tag="Diff" Content="Kopírovat nové/změněné (Diff)"/>
+                <ComboBoxItem Tag="Sync" Content="Synchronizovat (Sync, maže navíc)"/>
+                <ComboBoxItem Tag="Move" Content="Přesunout (Move)"/>
+                <ComboBoxItem Tag="NoExistDiff" Content="Jen chybějící (NoExistDiff)"/>
+            </ComboBox>
+            <CheckBox x:Name="VerifyBox" Content="Ověřit po kopii" IsChecked="True"
+                      VerticalAlignment="Center" Margin="16,0,0,0"/>
+        </StackPanel>
+
+        <TextBox Grid.Row="4" Grid.ColumnSpan="3" x:Name="LogBox" IsReadOnly="True"
+                 FontFamily="Consolas" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
+
+        <StackPanel Grid.Row="5" Grid.ColumnSpan="3" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,12,0,0">
+            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Margin="0,0,16,0"/>
+            <Button x:Name="StartButton" Content="Kopírovat" Width="110" Height="30" Click="Start_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
