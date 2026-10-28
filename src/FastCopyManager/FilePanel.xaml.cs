@@ -23,6 +23,53 @@ public partial class FilePanel : UserControl
 
     public event EventHandler? PathChanged;
 
+    public bool Brief { get; private set; }
+
+    /// <summary>Přepíná mezi plným výpisem (název, velikost, datum) a výpisem ve více sloupcích.</summary>
+    public void SetBrief(bool brief)
+    {
+        Brief = brief;
+        if (brief)
+        {
+            List.View = null;
+            List.ItemContainerStyle = (Style)FindResource("NcItemBrief");
+            List.ItemTemplate = (DataTemplate)FindResource("BriefTemplate");
+            List.ItemsPanel = (ItemsPanelTemplate)FindResource("BriefPanel");
+            ScrollViewer.SetHorizontalScrollBarVisibility(List, ScrollBarVisibility.Auto);
+            ScrollViewer.SetVerticalScrollBarVisibility(List, ScrollBarVisibility.Disabled);
+        }
+        else
+        {
+            List.ClearValue(ItemsControl.ItemsPanelProperty);
+            List.ItemTemplate = null;
+            List.ItemContainerStyle = (Style)FindResource("NcItem");
+            List.View = FullView;
+            ScrollViewer.SetHorizontalScrollBarVisibility(List, ScrollBarVisibility.Disabled);
+            ScrollViewer.SetVerticalScrollBarVisibility(List, ScrollBarVisibility.Auto);
+        }
+        ScrollToSelected();
+    }
+
+    /// <summary>Rolování až po dokončení rozložení, jinak se ve Brief režimu odroluje na špatné místo.</summary>
+    private void ScrollToSelected() =>
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            if (List.SelectedItem is not null) List.ScrollIntoView(List.SelectedItem);
+        });
+
+    /// <summary>V režimu Brief šipky vlevo/vpravo skáčou o celý sloupec.</summary>
+    private void MoveByColumn(int direction)
+    {
+        if (List.Items.Count == 0) return;
+        var probe = List.ItemContainerGenerator.ContainerFromIndex(0) as FrameworkElement;
+        var rowHeight = probe is { ActualHeight: > 0 } ? probe.ActualHeight : 20;
+        var rows = Math.Max(1, (int)(List.ActualHeight / rowHeight) - 1);
+        var index = Math.Clamp(List.SelectedIndex + direction * rows, 0, List.Items.Count - 1);
+        List.SelectedIndex = index;
+        List.ScrollIntoView(List.SelectedItem);
+        (List.ItemContainerGenerator.ContainerFromIndex(index) as UIElement)?.Focus();
+    }
+
     public FilePanel()
     {
         InitializeComponent();
@@ -53,7 +100,7 @@ public partial class FilePanel : UserControl
             List.ItemsSource = items;
             var back = items.FirstOrDefault(i => i.FullPath.Equals(select ?? previous, StringComparison.OrdinalIgnoreCase));
             List.SelectedItem = back ?? items.FirstOrDefault();
-            if (List.SelectedItem is not null) List.ScrollIntoView(List.SelectedItem);
+            ScrollToSelected();
             PathChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
@@ -112,7 +159,7 @@ public partial class FilePanel : UserControl
         PathText.Text = " " + ArchiveFile + "\\" + _archiveDir.TrimEnd('/').Replace('/', '\\') + " ";
         List.ItemsSource = items;
         List.SelectedItem = items.Count > 1 ? items[1] : items[0];
-        List.ScrollIntoView(List.SelectedItem);
+        ScrollToSelected();
         PathChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -184,5 +231,10 @@ public partial class FilePanel : UserControl
     {
         if (e.Key == Key.Enter && List.SelectedItem is FileItem item) { Open(item); e.Handled = true; }
         else if (e.Key == Key.Back) { GoUp(); e.Handled = true; }
+        else if (Brief && e.Key is Key.Left or Key.Right && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            MoveByColumn(e.Key == Key.Left ? -1 : 1);
+            e.Handled = true;
+        }
     }
 }

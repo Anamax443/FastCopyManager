@@ -52,11 +52,11 @@ public partial class MainWindow : Window
 
         _menus = new[]
         {
-            new MenuDef("Left", new[] { driveL, refresh }),
+            new MenuDef("Left", new[] { new MenuEntry("Brief", "Ctrl-F1", () => LeftPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F1", () => LeftPanel.SetBrief(false)), driveL, refresh }),
             new MenuDef("Files", new[] { view, edit, copy, move, pack, join, mkdir, del, quit }),
             new MenuDef("Disk", new[] { driveL, driveR }),
             new MenuDef("Commands", new[] { swap, refresh }),
-            new MenuDef("Right", new[] { driveR, refresh }),
+            new MenuDef("Right", new[] { new MenuEntry("Brief", "Ctrl-F2", () => RightPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F2", () => RightPanel.SetBrief(false)), driveR, refresh }),
         };
 
         for (var i = 0; i < _menus.Length; i++)
@@ -143,7 +143,7 @@ public partial class MainWindow : Window
 
     // ---- nastavení: poslední složky, cesty na flashce se ukládají relativně k disku s aplikací ----
 
-    private sealed record Settings(string? Left, string? Right, bool Verify);
+    private sealed record Settings(string? Left, string? Right, bool Verify, bool LeftBrief = false, bool RightBrief = false);
 
     private static readonly string SettingsPath = Path.Combine(AppContext.BaseDirectory, "settings.json");
     private static readonly string AppRoot = Path.GetPathRoot(AppContext.BaseDirectory) ?? "";
@@ -169,14 +169,19 @@ public partial class MainWindow : Window
 
         LeftPanel.Navigate(Pick(st?.Left));
         RightPanel.Navigate(Pick(st?.Right));
-        if (st is not null) VerifyBox.IsChecked = st.Verify;
+        if (st is not null)
+        {
+            VerifyBox.IsChecked = st.Verify;
+            if (st.LeftBrief) LeftPanel.SetBrief(true);
+            if (st.RightBrief) RightPanel.SetBrief(true);
+        }
     }
 
     private void SaveSettings()
     {
         try
         {
-            var st = new Settings(ToPortable(LeftPanel.CurrentPath), ToPortable(RightPanel.CurrentPath), VerifyBox.IsChecked == true);
+            var st = new Settings(ToPortable(LeftPanel.CurrentPath), ToPortable(RightPanel.CurrentPath), VerifyBox.IsChecked == true, LeftPanel.Brief, RightPanel.Brief);
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(st));
         }
         catch { /* flashka jen pro čtení, nic se neukládá */ }
@@ -235,6 +240,13 @@ public partial class MainWindow : Window
         if (MenuPopup.IsOpen)
         {
             HandleMenuKey(e.Key);
+            e.Handled = true;
+            return;
+        }
+        if (!_busy && Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.F1 or Key.F2)
+        {
+            var panel = e.Key == Key.F1 ? LeftPanel : RightPanel;
+            panel.SetBrief(!panel.Brief);
             e.Handled = true;
             return;
         }

@@ -7,12 +7,21 @@ Dvoupanelový správce souborů pro Windows (WPF, .NET 10) ve stylu Norton Comma
 | Klávesa | Akce |
 |---|---|
 | Tab | přepnout panel |
-| Enter / Backspace | otevřít / o úroveň výš |
-| F5 | kopírovat do druhého panelu |
+| Enter / Backspace | otevřít (složku, archiv) / o úroveň výš |
+| F3 | prohlížeč (text, F4 přepne na hex) |
+| F4 | editor (F2 uloží, Esc zavře) |
+| F5 | kopírovat do druhého panelu (v archivu rozbalit) |
+| Alt+F5 | zabalit vybrané do ZIPu |
 | F6 | přesunout |
+| Alt+F6 | spojit rozdělený soubor (.001, .002 ...) |
 | F7 | nová složka |
 | F8 / Delete | smazat (do koše; na flashce natrvalo, s upozorněním) |
+| F9 | menu nahoře (šipky, Enter, Esc) |
 | F10 | konec |
+| Alt+F1 / Alt+F2 | změnit disk v levém / pravém panelu |
+| Ctrl+F1 / Ctrl+F2 | přepnout levý / pravý panel mezi plným výpisem a více sloupci (Brief) |
+| Ctrl+U / Ctrl+R | prohodit panely / znovu načíst |
+| P / Esc | během kopírování pozastavit / zrušit |
 
 ## Kopírovací jádro
 
@@ -41,3 +50,11 @@ Vzhled napodobuje Norton Commander (modrý podklad, azurový rámeček, žlutý 
 - **Alt+F5** zabalí vybrané soubory a složky do ZIPu v druhém panelu.
 - RAR a 7z jen čtení a rozbalení; vytvářet jde jen ZIP (RAR je uzavřený formát). Do archivu se zapisovat nedá.
 - Čtení archivů zajišťuje knihovna SharpCompress (MIT).
+
+## Soubory nad 4 GB na FAT32
+
+Při kopírování souboru nad 4 GB na FAT32 se aplikace zeptá, jestli ho rozdělit na části po 2 GB (`nazev.001`, `.002` ...). Zpět se spojí přes Files > Join parts (Alt+F6). Dělení i spojení jsou vlastním kódem, s volitelným ověřením hashem.
+
+## Nastavení
+
+Poslední složky obou panelů, režim Brief a přepínač ověření se ukládají do `settings.json` vedle exe. Cesty na stejném disku, odkud aplikace běží, se ukládají relativně, takže po změně písmene flashky platí dál. Na flashce jen pro čtení se nastavení prostě neuloží.

@@ -38,6 +38,43 @@
             </Setter>
         </Style>
 
+        <!-- Brief: více sloupců, názvy jdou shora dolů a pak do dalšího sloupce -->
+        <Style x:Key="NcItemBrief" TargetType="ListViewItem">
+            <Setter Property="Foreground" Value="{StaticResource NcText}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="2,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListViewItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#FF00AAAA"/>
+                                <Setter Property="Foreground" Value="Black"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True"/>
+                                    <Condition Property="Selector.IsSelectionActive" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource NcCyan}"/>
+                                <Setter Property="Foreground" Value="Black"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <DataTemplate x:Key="BriefTemplate">
+            <TextBlock Text="{Binding Display}" Width="216" TextTrimming="CharacterEllipsis"/>
+        </DataTemplate>
+        <ItemsPanelTemplate x:Key="BriefPanel">
+            <WrapPanel Orientation="Vertical"
+                       Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=ScrollContentPresenter}}"/>
+        </ItemsPanelTemplate>
+
         <Style x:Key="NcHeader" TargetType="GridViewColumnHeader">
             <Setter Property="Background" Value="{StaticResource NcBlue}"/>
             <Setter Property="Foreground" Value="{StaticResource NcYellow}"/>
@@ -61,7 +98,7 @@
                       SelectionChanged="List_SelectionChanged"
                       MouseDoubleClick="List_MouseDoubleClick" PreviewKeyDown="List_PreviewKeyDown">
                 <ListView.View>
-                    <GridView ColumnHeaderContainerStyle="{StaticResource NcHeader}">
+                    <GridView x:Name="FullView" ColumnHeaderContainerStyle="{StaticResource NcHeader}">
                         <GridViewColumn Header="Name" Width="210" DisplayMemberBinding="{Binding Display}"/>
                         <GridViewColumn Header="Size" Width="90" DisplayMemberBinding="{Binding SizeText}"/>
                         <GridViewColumn Header="Date" Width="150" DisplayMemberBinding="{Binding DateText}"/>
