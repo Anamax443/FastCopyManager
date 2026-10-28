@@ -13,9 +13,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _active = LeftPanel;
-        var start = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        LeftPanel.Navigate(start);
-        RightPanel.Navigate(start);
+        LoadSettings();
+        Closing += (_, _) => SaveSettings();
         LeftPanel.GotKeyboardFocus += (_, _) => { _active = LeftPanel; UpdatePrompt(); };
         RightPanel.GotKeyboardFocus += (_, _) => { _active = RightPanel; UpdatePrompt(); };
         LeftPanel.PathChanged += (_, _) => UpdatePrompt();
@@ -40,6 +39,7 @@ public partial class MainWindow : Window
         var copy = new MenuEntry("Copy", "F5", () => Copy_Click(this, new RoutedEventArgs()));
         var move = new MenuEntry("Rename or move", "F6", () => Move_Click(this, new RoutedEventArgs()));
         var pack = new MenuEntry("Pack to ZIP", "Alt-F5", () => Pack_Click(this, new RoutedEventArgs()));
+        var join = new MenuEntry("Join parts", "Alt-F6", () => Join_Click(this, new RoutedEventArgs()));
         var mkdir = new MenuEntry("Make directory", "F7", () => MkDir_Click(this, new RoutedEventArgs()));
         var del = new MenuEntry("Delete", "F8", () => Delete_Click(this, new RoutedEventArgs()));
         var quit = new MenuEntry("Quit", "F10", Close);
@@ -51,7 +51,7 @@ public partial class MainWindow : Window
         _menus = new[]
         {
             new MenuDef("Left", new[] { driveL, refresh }),
-            new MenuDef("Files", new[] { copy, move, pack, mkdir, del, quit }),
+            new MenuDef("Files", new[] { copy, move, pack, join, mkdir, del, quit }),
             new MenuDef("Disk", new[] { driveL, driveR }),
             new MenuDef("Commands", new[] { swap, refresh }),
             new MenuDef("Right", new[] { driveR, refresh }),
@@ -139,6 +139,47 @@ public partial class MainWindow : Window
         RightPanel.Navigate(left);
     }
 
+    // ---- nastavení: poslední složky, cesty na flashce se ukládají relativně k disku s aplikací ----
+
+    private sealed record Settings(string? Left, string? Right, bool Verify);
+
+    private static readonly string SettingsPath = Path.Combine(AppContext.BaseDirectory, "settings.json");
+    private static readonly string AppRoot = Path.GetPathRoot(AppContext.BaseDirectory) ?? "";
+    private const string AppDrive = "<app>:";
+
+    private static string ToPortable(string path) =>
+        AppRoot.Length > 0 && path.StartsWith(AppRoot, StringComparison.OrdinalIgnoreCase)
+            ? AppDrive + path[AppRoot.Length..]
+            : path;
+
+    private static string FromPortable(string path) =>
+        path.StartsWith(AppDrive, StringComparison.Ordinal) ? AppRoot + path[AppDrive.Length..] : path;
+
+    private void LoadSettings()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        Settings? st = null;
+        try { st = System.Text.Json.JsonSerializer.Deserialize<Settings>(File.ReadAllText(SettingsPath)); }
+        catch { /* první spuštění nebo poškozený soubor */ }
+
+        string Pick(string? saved) =>
+            !string.IsNullOrEmpty(saved) && Directory.Exists(FromPortable(saved)) ? FromPortable(saved) : home;
+
+        LeftPanel.Navigate(Pick(st?.Left));
+        RightPanel.Navigate(Pick(st?.Right));
+        if (st is not null) VerifyBox.IsChecked = st.Verify;
+    }
+
+    private void SaveSettings()
+    {
+        try
+        {
+            var st = new Settings(ToPortable(LeftPanel.CurrentPath), ToPortable(RightPanel.CurrentPath), VerifyBox.IsChecked == true);
+            File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(st));
+        }
+        catch { /* flashka jen pro čtení, nic se neukládá */ }
+    }
+
     private void UpdatePrompt() => PromptText.Text = _active.CurrentPath.TrimEnd('\\') + "\\>";
 
     /// <summary>Spodní lišta F-kláves jako v Norton Commanderu: číslo bíle na černé, popisek černě na azurové.</summary>
@@ -182,6 +223,7 @@ public partial class MainWindow : Window
     private FilePanel Other => _active == LeftPanel ? RightPanel : LeftPanel;
 
     private CancellationTokenSource? _cts;
+    private CopyStats? _stats;
     private bool _busy;
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -202,6 +244,13 @@ public partial class MainWindow : Window
         if (_busy)
         {
             if (e.Key == Key.Escape) _cts?.Cancel();
+            else if (e.Key is Key.P or Key.Pause) _stats?.TogglePause();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.System && e.SystemKey == Key.F6)
+        {
+            Join_Click(this, e);
             e.Handled = true;
             return;
         }
@@ -269,7 +318,16 @@ public partial class MainWindow : Window
             overwrite = r == MessageBoxResult.Yes;
         }
 
-        var opt = new CopyOptions(overwrite, VerifyBox.IsChecked == true && plan is null);
+        var split = false;
+        if (plan is null && FileOps.NeedsSplit(items, dest))
+        {
+            var msg = "Některé soubory jsou větší než 4 GB a cíl je FAT32." + Environment.NewLine +
+                      "Rozdělit je na části po 2 GB (.001, .002 ...)? Spojit je půjde přes Files > Join parts.";
+            if (MessageBox.Show(msg, "FAT32", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            split = true;
+        }
+
+        var opt = new CopyOptions(overwrite, VerifyBox.IsChecked == true && plan is null, split);
         if (plan is not null)
         {
             var archive = source.ArchiveFile!;
@@ -309,10 +367,32 @@ public partial class MainWindow : Window
         await RunOperation("Balím", false, (st, ct) => Task.Run(() => FileOps.PackZip(items, zipPath, st, ct), ct), items.Count, source);
     }
 
+    private async void Join_Click(object sender, RoutedEventArgs e)
+    {
+        if (_active.InArchive || Other.InArchive)
+        {
+            StatusText.Text = "Spojovat lze jen mezi běžnými složkami.";
+            return;
+        }
+        var sel = _active.Selected;
+        if (sel.Count != 1 || FileOps.SplitBaseName(sel[0].Name) is not { } baseName)
+        {
+            StatusText.Text = "Vyber jednu část rozděleného souboru (.001, .002 ...).";
+            return;
+        }
+        var destFile = Path.Combine(Other.CurrentPath, Path.GetFileName(baseName));
+        if (File.Exists(destFile) &&
+            MessageBox.Show($"{Path.GetFileName(destFile)} už existuje. Přepsat?", "Potvrzení", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        var first = sel[0].FullPath;
+        await RunOperation("Spojuji", false, (st, ct) => Task.Run(() => FileOps.Join(first, destFile, st, ct), ct), 1, _active);
+    }
+
     /// <summary>Společný průběh: stav, rychlost, zbývající čas, Esc, závěrečné shrnutí.</summary>
     private async Task RunOperation(string verb, bool verify, Func<CopyStats, CancellationToken, Task> work, int count, FilePanel focusBack)
     {
         var stats = new CopyStats();
+        _stats = stats;
         _cts = new CancellationTokenSource();
         _busy = true;
 
@@ -329,7 +409,7 @@ public partial class MainWindow : Window
             lastDone = done; lastSec = sec;
             var total = Math.Max(stats.Total, 1);
             var left = speed > 1 ? TimeSpan.FromSeconds((total - done) / speed) : TimeSpan.Zero;
-            StatusText.Text = $"{verb}: {Path.GetFileName(stats.Current)}  {100.0 * done / total:0}%  {speed / 1048576:0} MB/s  zbývá {left:mm\\:ss}  (Esc = zrušit)";
+            StatusText.Text = $"{(stats.Paused ? "[PAUZA] " : "")}{verb}: {Path.GetFileName(stats.Current)}  {100.0 * done / total:0}%  {speed / 1048576:0} MB/s  zbývá {left:mm\\:ss}  (P = pauza, Esc = zrušit)";
         };
         timer.Start();
 

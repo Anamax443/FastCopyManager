@@ -8,7 +8,7 @@ using SharpCompress.Archives;
 
 namespace FastCopyManager;
 
-public sealed record CopyOptions(bool Overwrite, bool Verify);
+public sealed record CopyOptions(bool Overwrite, bool Verify, bool Split = false);
 
 /// <summary>Sdílený stav kopírování, čte ho UI přes časovač.</summary>
 public sealed class CopyStats
@@ -17,6 +17,12 @@ public sealed class CopyStats
     public long Total => Interlocked.Read(ref _total);
     public long Done => Interlocked.Read(ref _done);
     public volatile string Current = "";
+
+    private readonly ManualResetEventSlim _gate = new(true);
+    public bool Paused => !_gate.IsSet;
+    public void TogglePause() { if (_gate.IsSet) _gate.Reset(); else _gate.Set(); }
+    /// <summary>Blokuje, dokud je kopírování pozastavené (zrušení ho probudí).</summary>
+    public void Wait(CancellationToken ct) => _gate.Wait(ct);
     public void AddTotal(long n) => Interlocked.Add(ref _total, n);
     public void AddDone(long n) => Interlocked.Add(ref _done, n);
 }
@@ -32,9 +38,11 @@ public static class FileOps
     private const int ChunkSize = 4 * 1024 * 1024;     // buffer velkých souborů
     private const int PipelineDepth = 4;               // kolik bufferů je v předstihu
     private const long LargeFile = 8L * 1024 * 1024;   // od kdy se použije rouru
-    private const long Fat32Limit = 4L * 1024 * 1024 * 1024 - 1;
+    internal static long Fat32Limit = 4L * 1024 * 1024 * 1024 - 1;   // v testech se zmenšuje
 
-    private sealed record Job(string Src, string Dst, long Size, DateTime Modified);
+    private sealed record Job(string Src, string Dst, long Size, DateTime Modified, bool Split = false);
+
+    internal static long PartSize = 2L * 1024 * 1024 * 1024;   // velikost části při dělení na FAT32
 
     public static bool Conflicts(IEnumerable<FileItem> items, string destDir) =>
         items.Any(i => i.IsDir ? Directory.Exists(Path.Combine(destDir, i.Name)) : File.Exists(Path.Combine(destDir, i.Name)));
@@ -55,15 +63,18 @@ public static class FileOps
         CheckDestination(destDir, jobs, opt);
         stats.AddTotal(jobs.Sum(j => j.Size) * (opt.Verify ? 2 : 1));
 
-        var small = jobs.Where(j => j.Size < LargeFile).ToList();
-        var large = jobs.Where(j => j.Size >= LargeFile).ToList();
+        var small = jobs.Where(j => !j.Split && j.Size < LargeFile).ToList();
+        var large = jobs.Where(j => j.Split || j.Size >= LargeFile).ToList();
 
         var dop = Math.Clamp(Environment.ProcessorCount, 2, 8);
         await Parallel.ForEachAsync(small, new ParallelOptions { MaxDegreeOfParallelism = dop, CancellationToken = ct },
             (j, token) => { CopySmall(j, opt, stats, token); return ValueTask.CompletedTask; });
 
         foreach (var j in large)
-            await CopyPipelinedAsync(j, opt, stats, ct);
+        {
+            if (j.Split) CopySplit(j, opt, stats, ct);
+            else await CopyPipelinedAsync(j, opt, stats, ct);
+        }
     }
 
     /// <summary>Kontrola cíle před startem: existuje, jde do něj zapisovat, je v něm dost volného místa.</summary>
@@ -90,6 +101,163 @@ public static class FileOps
         var free = new DriveInfo(root).AvailableFreeSpace;
         if (needed > free)
             throw new IOException($"V cíli není dost místa: potřeba {needed / 1048576} MB, volno {free / 1048576} MB.");
+    }
+
+    // ---- FAT32: dělení souborů nad 4 GB a spojování ----
+
+    /// <summary>Je mezi položkami soubor nad 4 GB, zatímco cíl je FAT32?</summary>
+    public static bool NeedsSplit(IEnumerable<FileItem> items, string destDir)
+    {
+        if (!IsFat32(destDir)) return false;
+        foreach (var item in items)
+        {
+            if (!item.IsDir) { if (new FileInfo(item.FullPath).Length > Fat32Limit) return true; continue; }
+            if (new DirectoryInfo(item.FullPath).EnumerateFiles("*", System.IO.SearchOption.AllDirectories).Any(f => f.Length > Fat32Limit))
+                return true;
+        }
+        return false;
+    }
+
+    private static IEnumerable<string> PartFiles(string dst)
+    {
+        var dir = Path.GetDirectoryName(dst)!;
+        var name = Path.GetFileName(dst);
+        return Directory.EnumerateFiles(dir, name + ".???")
+            .Where(f => Path.GetExtension(f).Length == 4 && Path.GetExtension(f)[1..].All(char.IsDigit));
+    }
+
+    private static void CopySplit(Job j, CopyOptions opt, CopyStats stats, CancellationToken ct)
+    {
+        stats.Current = j.Src;
+        var finals = new List<string>();
+        var tmps = new List<string>();
+        var hasher = opt.Verify ? new XxHash3() : null;
+        var buffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
+        {
+            if (opt.Overwrite)
+                foreach (var old in PartFiles(j.Dst)) File.Delete(old);
+
+            using (var input = new FileStream(j.Src, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan))
+            {
+                FileStream? output = null;
+                long inPart = 0;
+                try
+                {
+                    int n;
+                    while ((n = input.Read(buffer, 0, ChunkSize)) > 0)
+                    {
+                        var off = 0;
+                        while (off < n)
+                        {
+                            ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                            if (output is null || inPart >= PartSize)
+                            {
+                                output?.Dispose();
+                                var name = $"{j.Dst}.{finals.Count + 1:000}";
+                                finals.Add(name);
+                                tmps.Add(name + ".fcm.tmp");
+                                output = new FileStream(tmps[^1], FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.SequentialScan);
+                                inPart = 0;
+                            }
+                            var take = (int)Math.Min(n - off, PartSize - inPart);
+                            output.Write(buffer, off, take);
+                            hasher?.Append(buffer.AsSpan(off, take));
+                            off += take;
+                            inPart += take;
+                            stats.AddDone(take);
+                        }
+                    }
+                }
+                finally
+                {
+                    output?.Dispose();
+                }
+            }
+
+            if (hasher is not null)
+            {
+                var actual = new XxHash3();
+                foreach (var t in tmps)
+                {
+                    using var check = new FileStream(t, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan);
+                    int n;
+                    while ((n = check.Read(buffer, 0, ChunkSize)) > 0)
+                    {
+                        ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                        actual.Append(buffer.AsSpan(0, n));
+                        stats.AddDone(n);
+                    }
+                }
+                if (!hasher.GetCurrentHash().AsSpan().SequenceEqual(actual.GetCurrentHash()))
+                    throw new IOException($"Ověření selhalo (hash se neshoduje): {j.Src}");
+            }
+
+            for (var i = 0; i < tmps.Count; i++)
+                File.Move(tmps[i], finals[i], opt.Overwrite);
+        }
+        catch
+        {
+            foreach (var t in tmps) TryDelete(t);
+            throw;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>Rozpozná část rozděleného souboru (název.001, .002 ...) a vrátí cestu bez číslovky.</summary>
+    public static string? SplitBaseName(string path)
+    {
+        var ext = Path.GetExtension(path);
+        return ext.Length == 4 && ext[1..].All(char.IsDigit) ? path[..^4] : null;
+    }
+
+    /// <summary>Spojí části název.001, název.002 ... do jednoho souboru.</summary>
+    public static void Join(string anyPart, string destFile, CopyStats stats, CancellationToken ct)
+    {
+        var baseName = SplitBaseName(anyPart) ?? throw new IOException("Vyber soubor s příponou .001, .002 ...");
+        var parts = new List<string>();
+        for (var i = 1; File.Exists($"{baseName}.{i:000}"); i++) parts.Add($"{baseName}.{i:000}");
+        if (parts.Count == 0) throw new IOException("Nenalezena první část (.001).");
+
+        var total = parts.Sum(p => new FileInfo(p).Length);
+        if (total > Fat32Limit && IsFat32(destFile))
+            throw new IOException("Spojený soubor by měl přes 4 GB a cíl je FAT32.");
+        var root = Path.GetPathRoot(Path.GetFullPath(destFile));
+        if (root is not null && new DriveInfo(root).AvailableFreeSpace < total)
+            throw new IOException($"V cíli není dost místa: potřeba {total / 1048576} MB.");
+
+        stats.AddTotal(total);
+        var tmp = destFile + ".fcm.tmp";
+        var buffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
+        {
+            using (var output = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.SequentialScan))
+                foreach (var part in parts)
+                {
+                    stats.Current = part;
+                    using var input = new FileStream(part, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan);
+                    int n;
+                    while ((n = input.Read(buffer, 0, ChunkSize)) > 0)
+                    {
+                        ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                        output.Write(buffer, 0, n);
+                        stats.AddDone(n);
+                    }
+                }
+            File.Move(tmp, destFile, true);
+        }
+        catch
+        {
+            TryDelete(tmp);
+            throw;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     // ---- archivy ----
@@ -132,7 +300,7 @@ public static class FileOps
         {
             foreach (var j in jobs)
             {
-                ct.ThrowIfCancellationRequested();
+                ct.ThrowIfCancellationRequested(); stats.Wait(ct);
                 if (!opt.Overwrite && File.Exists(j.Dst)) continue;
                 stats.Current = j.Src;
                 Directory.CreateDirectory(Path.GetDirectoryName(j.Dst)!);
@@ -145,7 +313,7 @@ public static class FileOps
                         int n;
                         while ((n = input.Read(buffer, 0, ChunkSize)) > 0)
                         {
-                            ct.ThrowIfCancellationRequested();
+                            ct.ThrowIfCancellationRequested(); stats.Wait(ct);
                             output.Write(buffer, 0, n);
                             stats.AddDone(n);
                         }
@@ -194,7 +362,7 @@ public static class FileOps
             {
                 foreach (var f in files)
                 {
-                    ct.ThrowIfCancellationRequested();
+                    ct.ThrowIfCancellationRequested(); stats.Wait(ct);
                     if (f.Full.Equals(zipFull, StringComparison.OrdinalIgnoreCase)) continue;
                     stats.Current = f.Full;
                     var entry = zip.CreateEntry(f.Entry, CompressionLevel.Fastest);
@@ -204,7 +372,7 @@ public static class FileOps
                     int n;
                     while ((n = input.Read(buffer, 0, ChunkSize)) > 0)
                     {
-                        ct.ThrowIfCancellationRequested();
+                        ct.ThrowIfCancellationRequested(); stats.Wait(ct);
                         es.Write(buffer, 0, n);
                         stats.AddDone(n);
                     }
@@ -239,16 +407,17 @@ public static class FileOps
 
     private static void PlanFile(FileInfo f, string dst, CopyOptions opt, List<Job> jobs)
     {
-        if (!opt.Overwrite && File.Exists(dst)) return;
-        if (f.Length > Fat32Limit && IsFat32(dst))
+        var split = f.Length > Fat32Limit && IsFat32(dst);
+        if (split && !opt.Split)
             throw new IOException($"Soubor {f.Name} je větší než 4 GB a cíl je FAT32.");
-        jobs.Add(new Job(f.FullName, dst, f.Length, f.LastWriteTime));
+        if (!opt.Overwrite && File.Exists(split ? dst + ".001" : dst)) return;
+        jobs.Add(new Job(f.FullName, dst, f.Length, f.LastWriteTime, split));
     }
 
     /// <summary>Malý soubor: jeden průchod čtení → zápis, bez režie roury.</summary>
     private static void CopySmall(Job j, CopyOptions opt, CopyStats stats, CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
+        ct.ThrowIfCancellationRequested(); stats.Wait(ct);
         stats.Current = j.Src;
         var tmp = j.Dst + ".fcm.tmp";
         var hasher = opt.Verify ? new XxHash3() : null;
@@ -262,7 +431,7 @@ public static class FileOps
                 int n;
                 while ((n = input.Read(buffer, 0, size)) > 0)
                 {
-                    ct.ThrowIfCancellationRequested();
+                    ct.ThrowIfCancellationRequested(); stats.Wait(ct);
                     hasher?.Append(buffer.AsSpan(0, n));
                     output.Write(buffer, 0, n);
                     stats.AddDone(n);
@@ -318,6 +487,7 @@ public static class FileOps
             {
                 await foreach (var (buf, len) in channel.Reader.ReadAllAsync(linked.Token))
                 {
+                    stats.Wait(linked.Token);
                     output.Write(buf, 0, len);
                     stats.AddDone(len);
                     ArrayPool<byte>.Shared.Return(buf);
@@ -357,7 +527,7 @@ public static class FileOps
             int n;
             while ((n = input.Read(buffer, 0, ChunkSize)) > 0)
             {
-                ct.ThrowIfCancellationRequested();
+                ct.ThrowIfCancellationRequested(); stats.Wait(ct);
                 hasher.Append(buffer.AsSpan(0, n));
                 stats.AddDone(n);
             }
@@ -374,8 +544,11 @@ public static class FileOps
         try { File.Delete(path); } catch { /* úklid dočasného souboru se nepovedl, nevadí */ }
     }
 
+    internal static bool? ForceFat32 = null;   // jen pro testy
+
     private static bool IsFat32(string path)
     {
+        if (ForceFat32 is { } forced) return forced;
         try
         {
             var root = Path.GetPathRoot(Path.GetFullPath(path));
