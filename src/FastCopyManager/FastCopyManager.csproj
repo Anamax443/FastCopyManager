@@ -10,6 +10,7 @@
     <Version>0.1.0</Version>
     <Company>AXIMA</Company>
     <Product>FastCopyManager</Product>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
