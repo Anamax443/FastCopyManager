@@ -11,7 +11,7 @@ public sealed class FileItem
 
     public string Display => IsDir ? $"[{Name}]" : Name;
     public string SizeText => IsParent ? "" : IsDir ? "<DIR>" : FormatSize(Size);
-    public string DateText => IsParent ? "" : Modified.ToString("dd.MM.yyyy HH:mm");
+    public string DateText => IsParent || Modified == default ? "" : Modified.ToString("dd.MM.yyyy HH:mm");
 
     private static string FormatSize(long b) => b switch
     {

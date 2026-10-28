@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     {
         var copy = new MenuEntry("Copy", "F5", () => Copy_Click(this, new RoutedEventArgs()));
         var move = new MenuEntry("Rename or move", "F6", () => Move_Click(this, new RoutedEventArgs()));
+        var pack = new MenuEntry("Pack to ZIP", "Alt-F5", () => Pack_Click(this, new RoutedEventArgs()));
         var mkdir = new MenuEntry("Make directory", "F7", () => MkDir_Click(this, new RoutedEventArgs()));
         var del = new MenuEntry("Delete", "F8", () => Delete_Click(this, new RoutedEventArgs()));
         var quit = new MenuEntry("Quit", "F10", Close);
@@ -50,7 +51,7 @@ public partial class MainWindow : Window
         _menus = new[]
         {
             new MenuDef("Left", new[] { driveL, refresh }),
-            new MenuDef("Files", new[] { copy, move, mkdir, del, quit }),
+            new MenuDef("Files", new[] { copy, move, pack, mkdir, del, quit }),
             new MenuDef("Disk", new[] { driveL, driveR }),
             new MenuDef("Commands", new[] { swap, refresh }),
             new MenuDef("Right", new[] { driveR, refresh }),
@@ -204,6 +205,12 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+        if (e.Key == Key.System && e.SystemKey == Key.F5)
+        {
+            Pack_Click(this, e);
+            e.Handled = true;
+            return;
+        }
         if (e.Key == Key.System && e.SystemKey is Key.F1 or Key.F2)
         {
             ChangeDrive(e.SystemKey == Key.F1 ? LeftPanel : RightPanel);
@@ -233,15 +240,28 @@ public partial class MainWindow : Window
     {
         var items = _active.Selected;
         if (items.Count == 0) return;
+        if (Other.InArchive)
+        {
+            StatusText.Text = "Do archivu nelze kopírovat. ZIP vytvoříš přes Alt+F5.";
+            return;
+        }
+        if (_active.InArchive && move)
+        {
+            StatusText.Text = "Z archivu lze jen kopírovat (rozbalit).";
+            return;
+        }
         var dest = Other.CurrentPath;
-        if (dest.Equals(_active.CurrentPath, StringComparison.OrdinalIgnoreCase))
+        if (!_active.InArchive && dest.Equals(_active.CurrentPath, StringComparison.OrdinalIgnoreCase))
         {
             StatusText.Text = "Zdroj a cíl jsou stejná složka.";
             return;
         }
 
+        var source = _active;
+        var plan = source.InArchive ? source.BuildExtractPlan(items) : null;
+        var conflicts = plan is not null ? FileOps.ExtractConflicts(plan, dest) : FileOps.Conflicts(items, dest);
         var overwrite = false;
-        if (FileOps.Conflicts(items, dest))
+        if (conflicts)
         {
             var r = MessageBox.Show("Některé položky v cíli už existují. Přepsat?\nAno = přepsat, Ne = přeskočit.",
                 "Konflikt", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
@@ -249,10 +269,50 @@ public partial class MainWindow : Window
             overwrite = r == MessageBoxResult.Yes;
         }
 
-        var verb = move ? "Přesouvám" : "Kopíruji";
+        var opt = new CopyOptions(overwrite, VerifyBox.IsChecked == true && plan is null);
+        if (plan is not null)
+        {
+            var archive = source.ArchiveFile!;
+            await RunOperation("Rozbaluji", false, (st, ct) => Task.Run(() => FileOps.Extract(archive, plan, dest, opt, st, ct), ct), items.Count, source);
+        }
+        else
+        {
+            await RunOperation(move ? "Přesouvám" : "Kopíruji", opt.Verify, async (st, ct) =>
+            {
+                await FileOps.CopyAsync(items, dest, opt, st, ct);
+                if (move) await Task.Run(() => FileOps.Delete(items, recycle: false));
+            }, items.Count, source);
+        }
+    }
+
+    private async void Pack_Click(object sender, RoutedEventArgs e)
+    {
+        var items = _active.Selected;
+        if (items.Count == 0) return;
+        if (_active.InArchive || Other.InArchive)
+        {
+            StatusText.Text = "Balit lze jen mezi běžnými složkami.";
+            return;
+        }
+        var folder = Path.GetFileName(_active.CurrentPath.TrimEnd('\\'));
+        var suggested = (items.Count == 1 ? Path.GetFileNameWithoutExtension(items[0].Name) : (folder.Length > 0 ? folder : "archiv")) + ".zip";
+        var name = Prompt("Vytvořit ZIP", "Název archivu:", suggested);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        name = name.Trim();
+        if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) name += ".zip";
+        var zipPath = Path.Combine(Other.CurrentPath, name);
+        if (File.Exists(zipPath) &&
+            MessageBox.Show($"{name} už existuje. Přepsat?", "Potvrzení", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
         var source = _active;
+        await RunOperation("Balím", false, (st, ct) => Task.Run(() => FileOps.PackZip(items, zipPath, st, ct), ct), items.Count, source);
+    }
+
+    /// <summary>Společný průběh: stav, rychlost, zbývající čas, Esc, závěrečné shrnutí.</summary>
+    private async Task RunOperation(string verb, bool verify, Func<CopyStats, CancellationToken, Task> work, int count, FilePanel focusBack)
+    {
         var stats = new CopyStats();
-        var opt = new CopyOptions(overwrite, VerifyBox.IsChecked == true);
         _cts = new CancellationTokenSource();
         _busy = true;
 
@@ -275,10 +335,9 @@ public partial class MainWindow : Window
 
         try
         {
-            await FileOps.CopyAsync(items, dest, opt, stats, _cts.Token);
-            if (move) await Task.Run(() => FileOps.Delete(items, recycle: false));
-            var mb = stats.Done / (opt.Verify ? 2.0 : 1.0) / 1048576;
-            StatusText.Text = $"Hotovo: {items.Count} položek, {mb:0.#} MB za {clock.Elapsed.TotalSeconds:0.0} s ({mb / Math.Max(clock.Elapsed.TotalSeconds, 0.001):0} MB/s){(opt.Verify ? ", ověřeno" : "")}.";
+            await work(stats, _cts.Token);
+            var mb = stats.Done / (verify ? 2.0 : 1.0) / 1048576;
+            StatusText.Text = $"Hotovo: {count} položek, {mb:0.#} MB za {clock.Elapsed.TotalSeconds:0.0} s ({mb / Math.Max(clock.Elapsed.TotalSeconds, 0.001):0} MB/s){(verify ? ", ověřeno" : "")}.";
         }
         catch (OperationCanceledException)
         {
@@ -295,12 +354,13 @@ public partial class MainWindow : Window
             _cts = null;
             LeftPanel.Refresh();
             RightPanel.Refresh();
-            source.ListControl.Focus();
+            focusBack.ListControl.Focus();
         }
     }
 
     private void MkDir_Click(object sender, RoutedEventArgs e)
     {
+        if (_active.InArchive) { StatusText.Text = "V archivu nelze měnit."; return; }
         var name = Prompt("Nová složka", "Název složky:");
         if (string.IsNullOrWhiteSpace(name)) return;
         try
@@ -313,6 +373,7 @@ public partial class MainWindow : Window
 
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
+        if (_active.InArchive) { StatusText.Text = "V archivu nelze měnit."; return; }
         var items = _active.Selected;
         if (items.Count == 0) return;
         var recycle = FileOps.HasRecycleBin(_active.CurrentPath);
@@ -329,9 +390,9 @@ public partial class MainWindow : Window
         _active.Refresh();
     }
 
-    private string? Prompt(string title, string label)
+    private string? Prompt(string title, string label, string initial = "")
     {
-        var box = new TextBox { Margin = new Thickness(0, 6, 0, 12) };
+        var box = new TextBox { Margin = new Thickness(0, 6, 0, 12), Text = initial };
         var ok = new Button { Content = "OK", Width = 80, IsDefault = true };
         var cancel = new Button { Content = "Zrušit", Width = 80, IsCancel = true, Margin = new Thickness(8, 0, 0, 0) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
@@ -347,7 +408,7 @@ public partial class MainWindow : Window
             Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize,
         };
         ok.Click += (_, _) => win.DialogResult = true;
-        win.Loaded += (_, _) => box.Focus();
+        win.Loaded += (_, _) => { box.Focus(); box.SelectAll(); };
         return win.ShowDialog() == true ? box.Text : null;
     }
 }

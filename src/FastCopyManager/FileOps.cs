@@ -1,8 +1,10 @@
 using System.Buffers;
 using System.IO;
 using System.IO.Hashing;
+using System.IO.Compression;
 using System.Threading.Channels;
 using Microsoft.VisualBasic.FileIO;
+using SharpCompress.Archives;
 
 namespace FastCopyManager;
 
@@ -88,6 +90,137 @@ public static class FileOps
         var free = new DriveInfo(root).AvailableFreeSpace;
         if (needed > free)
             throw new IOException($"V cíli není dost místa: potřeba {needed / 1048576} MB, volno {free / 1048576} MB.");
+    }
+
+    // ---- archivy ----
+
+    /// <summary>Jedna položka k rozbalení: klíč v archivu a relativní cílová cesta.</summary>
+    public sealed record ExtractEntry(string Key, string Rel);
+
+    public static string NormalizeKey(string key) => key.Replace('\\', '/').Trim('/');
+
+    public static bool ExtractConflicts(IEnumerable<ExtractEntry> plan, string destDir) =>
+        plan.Any(p => File.Exists(Path.Combine(destDir, p.Rel)));
+
+    /// <summary>Rozbalí vybrané položky archivu (zip, rar, 7z, tar) vlastním kopírovacím cyklem, přes dočasný soubor.</summary>
+    public static void Extract(string archivePath, IReadOnlyList<ExtractEntry> plan, string destDir, CopyOptions opt, CopyStats stats, CancellationToken ct)
+    {
+        if (!Directory.Exists(destDir))
+            throw new IOException($"Cílová složka neexistuje: {destDir}");
+
+        using var archive = ArchiveFactory.OpenArchive(archivePath);
+        var map = new Dictionary<string, IArchiveEntry>();
+        foreach (var e in archive.Entries.Where(e => !e.IsDirectory))
+            map.TryAdd(NormalizeKey(e.Key ?? ""), e);
+
+        var destFull = Path.GetFullPath(destDir).TrimEnd('\\') + "\\";
+        var jobs = new List<Job>();
+        foreach (var p in plan)
+        {
+            if (!map.TryGetValue(p.Key, out var entry)) continue;
+            var dst = Path.GetFullPath(Path.Combine(destDir, p.Rel));
+            if (!dst.StartsWith(destFull, StringComparison.OrdinalIgnoreCase))
+                throw new IOException($"Nebezpečná cesta v archivu: {p.Key}");
+            jobs.Add(new Job(p.Key, dst, entry.Size, entry.LastModifiedTime ?? DateTime.Now));
+        }
+
+        CheckDestination(destDir, jobs, opt);
+        stats.AddTotal(jobs.Sum(j => j.Size));
+
+        var buffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
+        {
+            foreach (var j in jobs)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!opt.Overwrite && File.Exists(j.Dst)) continue;
+                stats.Current = j.Src;
+                Directory.CreateDirectory(Path.GetDirectoryName(j.Dst)!);
+                var tmp = j.Dst + ".fcm.tmp";
+                try
+                {
+                    using (var input = map[j.Src].OpenEntryStream())
+                    using (var output = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.SequentialScan))
+                    {
+                        int n;
+                        while ((n = input.Read(buffer, 0, ChunkSize)) > 0)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            output.Write(buffer, 0, n);
+                            stats.AddDone(n);
+                        }
+                    }
+                    if (j.Modified.Year >= 1980) File.SetLastWriteTime(tmp, j.Modified);
+                    File.Move(tmp, j.Dst, opt.Overwrite);
+                }
+                catch
+                {
+                    TryDelete(tmp);
+                    throw;
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>Zabalí vybrané soubory a složky do ZIPu (zápis do dočasného souboru, přejmenování až po dokončení).</summary>
+    public static void PackZip(IReadOnlyList<FileItem> items, string zipPath, CopyStats stats, CancellationToken ct)
+    {
+        var files = new List<(string Full, string Entry, long Size, DateTime Mod)>();
+        foreach (var item in items)
+        {
+            if (!item.IsDir)
+            {
+                var fi = new FileInfo(item.FullPath);
+                files.Add((fi.FullName, fi.Name, fi.Length, fi.LastWriteTime));
+                continue;
+            }
+            var root = new DirectoryInfo(item.FullPath);
+            foreach (var f in root.EnumerateFiles("*", System.IO.SearchOption.AllDirectories))
+                files.Add((f.FullName, item.Name + "/" + Path.GetRelativePath(root.FullName, f.FullName).Replace('\\', '/'), f.Length, f.LastWriteTime));
+        }
+
+        stats.AddTotal(files.Sum(f => f.Size));
+        var zipFull = Path.GetFullPath(zipPath);
+        var tmp = zipPath + ".fcm.tmp";
+        var buffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
+        {
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, ChunkSize))
+            using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
+            {
+                foreach (var f in files)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (f.Full.Equals(zipFull, StringComparison.OrdinalIgnoreCase)) continue;
+                    stats.Current = f.Full;
+                    var entry = zip.CreateEntry(f.Entry, CompressionLevel.Fastest);
+                    entry.LastWriteTime = f.Mod.Year < 1980 ? new DateTime(1980, 1, 1) : f.Mod;
+                    using var es = entry.Open();
+                    using var input = new FileStream(f.Full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1, FileOptions.SequentialScan);
+                    int n;
+                    while ((n = input.Read(buffer, 0, ChunkSize)) > 0)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        es.Write(buffer, 0, n);
+                        stats.AddDone(n);
+                    }
+                }
+            }
+            File.Move(tmp, zipPath, true);
+        }
+        catch
+        {
+            TryDelete(tmp);
+            throw;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private static void Plan(string src, string dst, CopyOptions opt, List<Job> jobs)

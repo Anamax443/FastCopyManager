@@ -33,3 +33,11 @@ dotnet build -c Release
 ## Písmo a licence
 
 Vzhled napodobuje Norton Commander (modrý podklad, azurový rámeček, žlutý kurzor, DOSové písmo). Použité písmo **MxPlus IBM VGA 8x16** je z balíku *The Ultimate Oldschool PC Font Pack* (VileR, https://int10h.org/oldschool-pc-fonts/), licence CC BY-SA 4.0, viz `src/FastCopyManager/Fonts/LICENSE-font-CC-BY-SA-4.0.txt`.
+
+## Archivy
+
+- **Enter na .zip / .rar / .7z / .tar** otevře archiv jako složku, Backspace nebo `..` ze kořene vrátí do složky s archivem.
+- **F5** v archivu rozbalí vybrané soubory a složky do druhého panelu (vlastním kopírovacím cyklem, s kontrolou cesty proti podvrženým archivům).
+- **Alt+F5** zabalí vybrané soubory a složky do ZIPu v druhém panelu.
+- RAR a 7z jen čtení a rozbalení; vytvářet jde jen ZIP (RAR je uzavřený formát). Do archivu se zapisovat nedá.
+- Čtení archivů zajišťuje knihovna SharpCompress (MIT).
