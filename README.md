@@ -67,3 +67,11 @@ Poslední složky obou panelů, režim Brief a přepínač ověření se ukláda
 Aplikace mluví česky nebo anglicky. Při prvním spuštění se vybere podle jazyka Windows (česky jen na české lokalizaci, jinak anglicky), přepíná se přes Ctrl+L a volba se uloží do `settings.json`. Texty jsou v kódu česky a anglický překlad je ve slovníku `Loc.cs`; chybí-li překlad, použije se čeština. Názvy menu a F-kláves zůstávají anglicky jako v originálním Nortonu.
 
 Podržení **Alt** přepne dolní lištu na příkazy na Alt (Pack, Join, Unpack, změna disku).
+
+## Balení a heslo
+
+Alt+F5 otevře dialog: název, formát (ZIP, TAR.GZ nebo TAR), komprese (bez, rychlá, normální, nejlepší) a volitelné heslo. Heslo jde jen u ZIPu a používá šifrování AES-256 (Průzkumník Windows takové ZIPy neotevře, funguje 7-Zip a WinRAR). Při rozbalení zaheslovaného archivu se aplikace na heslo zeptá.
+
+## Fronta
+
+Když běží kopírování a dáš další F5, F6, Alt+F5 nebo Alt+F9, nová úloha se zařadí do fronty a poběží po dokončení předchozí. Počet čekajících úloh je vidět ve stavovém řádku. Esc zruší běžící úlohu, Shift+Esc zruší i frontu, P pozastaví. Za běhu se dá dál procházet panely; mazání a vytváření složek je po dobu operace zakázané.

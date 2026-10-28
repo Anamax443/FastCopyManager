@@ -264,13 +264,125 @@ public static class FileOps
 
     public static readonly string[] ArchiveExtensions = { ".zip", ".rar", ".7z", ".tar" };
 
+    private static SharpCompress.Readers.ReaderOptions ReaderOptionsFor(string? password) =>
+        new() { Password = password };
+
+    /// <summary>Je v archivu něco zašifrované (nebo se bez hesla nedá ani otevřít)?</summary>
+    public static bool IsEncrypted(string archivePath)
+    {
+        if (IsTarGzName(archivePath)) return false;
+        try
+        {
+            using var archive = ArchiveFactory.OpenArchive(archivePath);
+            return archive.Entries.Any(e => !e.IsDirectory && e.IsEncrypted);
+        }
+        catch
+        {
+            return true;   // zašifrované hlavičky: bez hesla nejde ani vypsat obsah
+        }
+    }
+
     public static bool IsArchiveName(string name) =>
-        ArchiveExtensions.Contains(Path.GetExtension(name), StringComparer.OrdinalIgnoreCase);
+        ArchiveExtensions.Contains(Path.GetExtension(name), StringComparer.OrdinalIgnoreCase) || IsTarGzName(name);
+
+    public static bool IsTarGzName(string name) =>
+        name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Obsah TAR.GZ (SharpCompress ho neotevře): projde se proudově přes GZip a System.Formats.Tar.</summary>
+    public static List<(string Key, bool IsDir, long Size, DateTime Mod)> ListTarGz(string archivePath)
+    {
+        var list = new List<(string Key, bool IsDir, long Size, DateTime Mod)>();
+        using var fs = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan);
+        using var gz = new GZipStream(fs, CompressionMode.Decompress);
+        using var tar = new System.Formats.Tar.TarReader(gz);
+        while (tar.GetNextEntry(copyData: false) is { } entry)
+        {
+            var key = NormalizeKey(entry.Name);
+            if (key.Length == 0) continue;
+            if (entry.EntryType == System.Formats.Tar.TarEntryType.Directory)
+                list.Add((key, true, 0, entry.ModificationTime.LocalDateTime));
+            else if (entry.EntryType is System.Formats.Tar.TarEntryType.RegularFile or System.Formats.Tar.TarEntryType.V7RegularFile)
+                list.Add((key, false, entry.Length, entry.ModificationTime.LocalDateTime));
+        }
+        return list;
+    }
+
+    private static void ExtractTarGz(string archivePath, IReadOnlyList<ExtractEntry> plan, string destDir, CopyOptions opt, CopyStats stats, CancellationToken ct)
+    {
+        var wanted = plan.GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.First().Rel);
+        var destFull = Path.GetFullPath(destDir).TrimEnd((char)92) + (char)92;
+        var jobs = new List<Job>();
+        foreach (var (key, isDir, size, mod) in ListTarGz(archivePath))
+        {
+            if (isDir || !wanted.TryGetValue(key, out var rel)) continue;
+            var dst = Path.GetFullPath(Path.Combine(destDir, rel));
+            if (!dst.StartsWith(destFull, StringComparison.OrdinalIgnoreCase))
+                throw new IOException(Loc.T("Nebezpečná cesta v archivu: {0}", key));
+            jobs.Add(new Job(key, dst, size, mod));
+        }
+
+        CheckDestination(destDir, jobs, opt);
+        stats.AddTotal(jobs.Sum(j => j.Size));
+        var byKey = jobs.ToDictionary(j => j.Src);
+
+        var buffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
+        {
+            using var fs = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan);
+            using var gz = new GZipStream(fs, CompressionMode.Decompress);
+            using var tar = new System.Formats.Tar.TarReader(gz);
+            while (tar.GetNextEntry(copyData: false) is { } entry)
+            {
+                ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                if (entry.DataStream is null || !byKey.TryGetValue(NormalizeKey(entry.Name), out var j)) continue;
+                if (!opt.Overwrite && File.Exists(j.Dst)) continue;
+                stats.Current = j.Src;
+                Directory.CreateDirectory(Path.GetDirectoryName(j.Dst)!);
+                var tmp = j.Dst + ".fcm.tmp";
+                try
+                {
+                    using (var output = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.SequentialScan))
+                    {
+                        int n;
+                        while ((n = entry.DataStream.Read(buffer, 0, ChunkSize)) > 0)
+                        {
+                            ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                            output.Write(buffer, 0, n);
+                            stats.AddDone(n);
+                        }
+                    }
+                    if (j.Modified.Year >= 1980) File.SetLastWriteTime(tmp, j.Modified);
+                    File.Move(tmp, j.Dst, opt.Overwrite);
+                }
+                catch
+                {
+                    TryDelete(tmp);
+                    throw;
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
 
     /// <summary>Všechny soubory archivu jako plán rozbalení do kořene cíle.</summary>
-    public static List<ExtractEntry> PlanAll(string archivePath)
+    public static List<ExtractEntry> PlanAll(string archivePath, string? password = null)
     {
-        using var archive = ArchiveFactory.OpenArchive(archivePath);
+        try { return PlanAllCore(archivePath, password); }
+        catch (Exception ex) when (WrongPassword(ex, password))
+        {
+            throw new IOException(Loc.T("Špatné heslo nebo poškozený archiv."), ex);
+        }
+    }
+
+    private static List<ExtractEntry> PlanAllCore(string archivePath, string? password)
+    {
+        if (IsTarGzName(archivePath))
+            return ListTarGz(archivePath).Where(r => !r.IsDir).Select(r => new ExtractEntry(r.Key, r.Key)).ToList();
+
+        using var archive = ArchiveFactory.OpenArchive(archivePath, ReaderOptionsFor(password));
         return archive.Entries
             .Where(e => !e.IsDirectory)
             .Select(e => NormalizeKey(e.Key ?? ""))
@@ -288,12 +400,38 @@ public static class FileOps
         plan.Any(p => File.Exists(Path.Combine(destDir, p.Rel)));
 
     /// <summary>Rozbalí vybrané položky archivu (zip, rar, 7z, tar) vlastním kopírovacím cyklem, přes dočasný soubor.</summary>
-    public static void Extract(string archivePath, IReadOnlyList<ExtractEntry> plan, string destDir, CopyOptions opt, CopyStats stats, CancellationToken ct)
+    public static void Extract(string archivePath, IReadOnlyList<ExtractEntry> plan, string destDir, CopyOptions opt, CopyStats stats, CancellationToken ct, string? password = null)
+    {
+        try { ExtractCore(archivePath, plan, destDir, opt, stats, ct, password); }
+        catch (Exception ex) when (WrongPassword(ex, password))
+        {
+            throw new IOException(Loc.T("Špatné heslo nebo poškozený archiv."), ex);
+        }
+    }
+
+    /// <summary>Chyba při otevírání s heslem (ne zrušení, ne chyba disku) = nejspíš špatné heslo.</summary>
+    private static bool WrongPassword(Exception ex, string? password) =>
+        !string.IsNullOrEmpty(password) && ex is not (OperationCanceledException or IOException or UnauthorizedAccessException);
+
+    private static void ExtractCore(string archivePath, IReadOnlyList<ExtractEntry> plan, string destDir, CopyOptions opt, CopyStats stats, CancellationToken ct, string? password)
     {
         if (!Directory.Exists(destDir))
             throw new IOException(Loc.T("Cílová složka neexistuje: {0}", destDir));
 
-        using var archive = ArchiveFactory.OpenArchive(archivePath);
+        if (IsTarGzName(archivePath))
+        {
+            ExtractTarGz(archivePath, plan, destDir, opt, stats, ct);
+            return;
+        }
+
+        // Zaheslované ZIPy (AES-256, ZipCrypto) čte SharpZipLib, SharpCompress si s AES ZIPy z jiných nástrojů neporadí.
+        if (!string.IsNullOrEmpty(password) && string.Equals(Path.GetExtension(archivePath), ".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            ExtractZipWithPassword(archivePath, plan, destDir, opt, stats, ct, password);
+            return;
+        }
+
+        using var archive = ArchiveFactory.OpenArchive(archivePath, ReaderOptionsFor(password));
         var map = new Dictionary<string, IArchiveEntry>();
         foreach (var e in archive.Entries.Where(e => !e.IsDirectory))
             map.TryAdd(NormalizeKey(e.Key ?? ""), e);
@@ -351,8 +489,68 @@ public static class FileOps
         }
     }
 
+    private static void ExtractZipWithPassword(string archivePath, IReadOnlyList<ExtractEntry> plan, string destDir, CopyOptions opt, CopyStats stats, CancellationToken ct, string password)
+    {
+        using var zip = new ICSharpCode.SharpZipLib.Zip.ZipFile(archivePath) { Password = password };
+        var map = new Dictionary<string, ICSharpCode.SharpZipLib.Zip.ZipEntry>();
+        foreach (ICSharpCode.SharpZipLib.Zip.ZipEntry e in zip)
+            if (e.IsFile) map.TryAdd(NormalizeKey(e.Name), e);
+
+        var destFull = Path.GetFullPath(destDir).TrimEnd((char)92) + (char)92;
+        var jobs = new List<Job>();
+        foreach (var p in plan)
+        {
+            if (!map.TryGetValue(p.Key, out var entry)) continue;
+            var dst = Path.GetFullPath(Path.Combine(destDir, p.Rel));
+            if (!dst.StartsWith(destFull, StringComparison.OrdinalIgnoreCase))
+                throw new IOException(Loc.T("Nebezpečná cesta v archivu: {0}", p.Key));
+            jobs.Add(new Job(p.Key, dst, entry.Size, entry.DateTime));
+        }
+
+        CheckDestination(destDir, jobs, opt);
+        stats.AddTotal(jobs.Sum(j => j.Size));
+
+        var buffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
+        {
+            foreach (var j in jobs)
+            {
+                ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                if (!opt.Overwrite && File.Exists(j.Dst)) continue;
+                stats.Current = j.Src;
+                Directory.CreateDirectory(Path.GetDirectoryName(j.Dst)!);
+                var tmp = j.Dst + ".fcm.tmp";
+                try
+                {
+                    using (var input = zip.GetInputStream(map[j.Src]))
+                    using (var output = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.SequentialScan))
+                    {
+                        int n;
+                        while ((n = input.Read(buffer, 0, ChunkSize)) > 0)
+                        {
+                            ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                            output.Write(buffer, 0, n);
+                            stats.AddDone(n);
+                        }
+                    }
+                    if (j.Modified.Year >= 1980) File.SetLastWriteTime(tmp, j.Modified);
+                    File.Move(tmp, j.Dst, opt.Overwrite);
+                }
+                catch
+                {
+                    TryDelete(tmp);
+                    throw;
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     /// <summary>Zabalí vybrané soubory a složky do ZIPu (zápis do dočasného souboru, přejmenování až po dokončení).</summary>
-    public static void PackZip(IReadOnlyList<FileItem> items, string zipPath, CopyStats stats, CancellationToken ct)
+    public static void PackZip(IReadOnlyList<FileItem> items, string zipPath, CopyStats stats, CancellationToken ct, CompressionLevel level = CompressionLevel.Fastest)
     {
         var files = new List<(string Full, string Entry, long Size, DateTime Mod)>();
         foreach (var item in items)
@@ -382,7 +580,7 @@ public static class FileOps
                     ct.ThrowIfCancellationRequested(); stats.Wait(ct);
                     if (f.Full.Equals(zipFull, StringComparison.OrdinalIgnoreCase)) continue;
                     stats.Current = f.Full;
-                    var entry = zip.CreateEntry(f.Entry, CompressionLevel.Fastest);
+                    var entry = zip.CreateEntry(f.Entry, level);
                     entry.LastWriteTime = f.Mod.Year < 1980 ? new DateTime(1980, 1, 1) : f.Mod;
                     using var es = entry.Open();
                     using var input = new FileStream(f.Full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1, FileOptions.SequentialScan);
@@ -405,6 +603,134 @@ public static class FileOps
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    // ---- balení: ZIP (volitelně s heslem AES-256), TAR, TAR.GZ ----
+
+    public static void Pack(IReadOnlyList<FileItem> items, string path, PackFormat format, CompressionLevel level, string? password, CopyStats stats, CancellationToken ct)
+    {
+        switch (format)
+        {
+            case PackFormat.Zip when !string.IsNullOrEmpty(password):
+                PackZipEncrypted(items, path, password, level, stats, ct);
+                break;
+            case PackFormat.Zip:
+                PackZip(items, path, stats, ct, level);
+                break;
+            default:
+                PackTar(items, path, format == PackFormat.TarGz, level, stats, ct);
+                break;
+        }
+    }
+
+    private static List<(string Full, string Entry, long Size, DateTime Mod)> CollectFiles(IReadOnlyList<FileItem> items)
+    {
+        var files = new List<(string Full, string Entry, long Size, DateTime Mod)>();
+        foreach (var item in items)
+        {
+            if (!item.IsDir)
+            {
+                var fi = new FileInfo(item.FullPath);
+                files.Add((fi.FullName, fi.Name, fi.Length, fi.LastWriteTime));
+                continue;
+            }
+            var root = new DirectoryInfo(item.FullPath);
+            foreach (var f in root.EnumerateFiles("*", System.IO.SearchOption.AllDirectories))
+                files.Add((f.FullName, item.Name + "/" + Path.GetRelativePath(root.FullName, f.FullName).Replace(Path.DirectorySeparatorChar, '/'), f.Length, f.LastWriteTime));
+        }
+        return files;
+    }
+
+    private static void PackZipEncrypted(IReadOnlyList<FileItem> items, string zipPath, string password, CompressionLevel level, CopyStats stats, CancellationToken ct)
+    {
+        var files = CollectFiles(items);
+        stats.AddTotal(files.Sum(f => f.Size));
+        var zipFull = Path.GetFullPath(zipPath);
+        var tmp = zipPath + ".fcm.tmp";
+        var buffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
+        {
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, ChunkSize))
+            using (var zs = new ICSharpCode.SharpZipLib.Zip.ZipOutputStream(fs))
+            {
+                zs.SetLevel(level switch
+                {
+                    CompressionLevel.NoCompression => 0,
+                    CompressionLevel.Fastest => 1,
+                    CompressionLevel.SmallestSize => 9,
+                    _ => 6,
+                });
+                zs.Password = password;
+                foreach (var f in files)
+                {
+                    ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                    if (f.Full.Equals(zipFull, StringComparison.OrdinalIgnoreCase)) continue;
+                    stats.Current = f.Full;
+                    var entry = new ICSharpCode.SharpZipLib.Zip.ZipEntry(f.Entry)
+                    {
+                        DateTime = f.Mod.Year < 1980 ? new DateTime(1980, 1, 1) : f.Mod,
+                        AESKeySize = 256,
+                        IsUnicodeText = true,
+                    };
+                    zs.PutNextEntry(entry);
+                    using (var input = new FileStream(f.Full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1, FileOptions.SequentialScan))
+                    {
+                        int n;
+                        while ((n = input.Read(buffer, 0, ChunkSize)) > 0)
+                        {
+                            ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                            zs.Write(buffer, 0, n);
+                            stats.AddDone(n);
+                        }
+                    }
+                    zs.CloseEntry();
+                }
+                zs.Finish();
+            }
+            File.Move(tmp, zipPath, true);
+        }
+        catch
+        {
+            TryDelete(tmp);
+            throw;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static void PackTar(IReadOnlyList<FileItem> items, string path, bool gzip, CompressionLevel level, CopyStats stats, CancellationToken ct)
+    {
+        var files = CollectFiles(items);
+        stats.AddTotal(files.Sum(f => f.Size));
+        var full = Path.GetFullPath(path);
+        var tmp = path + ".fcm.tmp";
+        try
+        {
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, ChunkSize))
+            {
+                Stream target = gzip ? new GZipStream(fs, level) : fs;
+                using (target)
+                using (var tar = new System.Formats.Tar.TarWriter(target, System.Formats.Tar.TarEntryFormat.Pax, leaveOpen: true))
+                {
+                    foreach (var f in files)
+                    {
+                        ct.ThrowIfCancellationRequested(); stats.Wait(ct);
+                        if (f.Full.Equals(full, StringComparison.OrdinalIgnoreCase)) continue;
+                        stats.Current = f.Full;
+                        tar.WriteEntry(f.Full, f.Entry);
+                        stats.AddDone(f.Size);
+                    }
+                }
+            }
+            File.Move(tmp, path, true);
+        }
+        catch
+        {
+            TryDelete(tmp);
+            throw;
         }
     }
 

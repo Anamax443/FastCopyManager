@@ -18,7 +18,7 @@ F8, Delete  Smazat
 F9          Menu nahoře
 F10         Konec
 
-Alt+F5      Zabalit vybrané do ZIPu (v druhém panelu)
+Alt+F5      Zabalit vybrané (dialog: ZIP / TAR.GZ / TAR, komprese, heslo AES-256)
 Alt+F9      Rozbalit vybraný archiv (zip, rar, 7z, tar) do druhého panelu
 Alt+F6      Spojit rozdělený soubor (.001, .002 ...)
 Alt+F1/F2   Změnit disk v levém / pravém panelu
@@ -36,7 +36,8 @@ Tab         Druhý panel (také šipky vlevo / vpravo)
 Šipka dolů z posledního řádku  příkazový řádek a dolní lišta
 Enter       Otevřít složku; na .zip .rar .7z .tar otevře archiv jako složku
 Backspace   O úroveň výš
-P / Esc     Během kopírování pozastavit / zrušit
+P / Esc     Během kopírování pozastavit / zrušit (Shift+Esc zruší i frontu)
+F5, F6, Alt+F5, Alt+F9 při běžící operaci zařadí další úlohu do fronty
 Alt (podržet) Dolní lišta ukáže příkazy na Alt
 
 Esc zavře nápovědu.";
@@ -51,7 +52,7 @@ F8, Delete  Delete
 F9          Top menu
 F10         Quit
 
-Alt+F5      Pack selected items into a ZIP (in the other panel)
+Alt+F5      Pack selected items (dialog: ZIP / TAR.GZ / TAR, compression, AES-256 password)
 Alt+F9      Unpack the selected archive (zip, rar, 7z, tar) into the other panel
 Alt+F6      Join a split file (.001, .002 ...)
 Alt+F1/F2   Change drive in the left / right panel
@@ -69,7 +70,8 @@ Up arrow on the first row    top menu
 Down arrow on the last row   command line and bottom bar
 Enter       Open a folder; on .zip .rar .7z .tar opens the archive like a folder
 Backspace   Go up one level
-P / Esc     Pause / cancel while copying
+P / Esc     Pause / cancel while copying (Shift+Esc also clears the queue)
+F5, F6, Alt+F5, Alt+F9 while an operation runs add the next job to the queue
 Alt (hold)  The bottom bar shows the Alt commands
 
 Esc closes this help.";

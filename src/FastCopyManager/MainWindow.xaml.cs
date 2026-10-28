@@ -14,7 +14,15 @@ public partial class MainWindow : Window
         InitializeComponent();
         _active = LeftPanel;
         LoadSettings();
-        Closing += (_, _) => SaveSettings();
+        Closing += (_, e) =>
+        {
+            if (_busy && MessageBox.Show(Loc.T("Probíhá kopírování. Opravdu ukončit?"), "FastCopyManager", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+            SaveSettings();
+        };
         LeftPanel.GotKeyboardFocus += (_, _) => { _active = LeftPanel; UpdatePrompt(); SetZone(Zone.Panels); };
         RightPanel.GotKeyboardFocus += (_, _) => { _active = RightPanel; UpdatePrompt(); SetZone(Zone.Panels); };
         LeftPanel.PathChanged += (_, _) => UpdatePrompt();
@@ -75,7 +83,7 @@ public partial class MainWindow : Window
             new MenuDef("Left", new[] { new MenuEntry("Brief", "Ctrl-F1", () => LeftPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F1", () => LeftPanel.SetBrief(false)) }.Concat(SortEntries(LeftPanel)).Concat(new[] { driveL, refresh }).ToArray()),
             new MenuDef("Files", new[] { help, view, edit, copy, move, unpack, pack, join, mkdir, del, quit }),
             new MenuDef("Disk", new[] { driveL, driveR }),
-            new MenuDef("Commands", new[] { swap, refresh, new MenuEntry("Language CS/EN", "Ctrl-L", ToggleLanguage) }),
+            new MenuDef("Commands", new[] { swap, refresh, new MenuEntry("Language CS/EN", "Ctrl-L", ToggleLanguage), new MenuEntry("Clear queue", "Shift-Esc", ClearQueue) }),
             new MenuDef("Right", new[] { new MenuEntry("Brief", "Ctrl-F2", () => RightPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F2", () => RightPanel.SetBrief(false)) }.Concat(SortEntries(RightPanel)).Concat(new[] { driveR, refresh }).ToArray()),
         };
 
@@ -88,11 +96,8 @@ public partial class MainWindow : Window
             tb.Inlines.Add(title[1..]);
             tb.MouseLeftButtonDown += (_, e) =>
             {
-                if (!_busy)
-                {
-                    if (MenuPopup.IsOpen && _menuIndex == idx) CloseMenu(false);
-                    else OpenMenu(idx);
-                }
+                if (MenuPopup.IsOpen && _menuIndex == idx) CloseMenu(false);
+                else OpenMenu(idx);
                 e.Handled = true;
             };
             _menuHeaders.Add(tb);
@@ -335,7 +340,7 @@ public partial class MainWindow : Window
     /// <summary>Psaní v panelu se přesměruje do příkazového řádku, jako v Norton Commanderu.</summary>
     private void Window_PreviewTextInput(object sender, TextCompositionEventArgs e)
     {
-        if (_busy || MenuPopup.IsOpen || _zone != Zone.Panels || e.Text.Length != 1) return;
+        if (MenuPopup.IsOpen || _zone != Zone.Panels || e.Text.Length != 1) return;
         var c = e.Text[0];
         if (!(char.IsLetterOrDigit(c) || c == (char)92 || "._-:~/$%&()+=,;@!#".IndexOf(c) >= 0)) return;
         CommandBox.Focus();
@@ -460,7 +465,7 @@ public partial class MainWindow : Window
             cell.Children.Add(lbl);
             var fkIdx = _fkeys.Count;
             _fkeys.Add((lbl, act));
-            cell.MouseLeftButtonUp += (_, _) => { if (!_busy) _fkeys[fkIdx].Act?.Invoke(); };
+            cell.MouseLeftButtonUp += (_, _) => _fkeys[fkIdx].Act?.Invoke();
             FKeyBar.Children.Add(cell);
         }
         _fkNormal = keys.Select(k => (k.Label, k.Act)).ToArray();
@@ -523,12 +528,12 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (!_busy && Keyboard.Modifiers == ModifierKeys.None && HandleZoneKey(e))
+        if (Keyboard.Modifiers == ModifierKeys.None && HandleZoneKey(e))
         {
             e.Handled = true;
             return;
         }
-        if (!_busy && Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.F3 or Key.F4 or Key.F5 or Key.F6 or Key.F7)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.F3 or Key.F4 or Key.F5 or Key.F6 or Key.F7)
         {
             _active.SetSort(e.Key switch
             {
@@ -541,14 +546,14 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (!_busy && Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.F1 or Key.F2)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.F1 or Key.F2)
         {
             var panel = e.Key == Key.F1 ? LeftPanel : RightPanel;
             panel.SetBrief(!panel.Brief);
             e.Handled = true;
             return;
         }
-        if (!_busy && Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R or Key.L)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R or Key.L)
         {
             if (e.Key == Key.L) ToggleLanguage();
             else if (e.Key == Key.U) SwapPanels();
@@ -556,10 +561,17 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (_busy)
+        if (_busy && (e.Key == Key.Escape || (_zone != Zone.CommandLine && e.Key is Key.P or Key.Pause)))
         {
-            if (e.Key == Key.Escape) _cts?.Cancel();
-            else if (e.Key is Key.P or Key.Pause) _stats?.TogglePause();
+            if (e.Key == Key.Escape)
+            {
+                if (Keyboard.Modifiers == ModifierKeys.Shift) ClearQueue();
+                _cts?.Cancel();
+            }
+            else
+            {
+                _stats?.TogglePause();
+            }
             e.Handled = true;
             return;
         }
@@ -655,11 +667,17 @@ public partial class MainWindow : Window
         if (plan is not null)
         {
             var archive = source.ArchiveFile!;
-            await RunOperation(Loc.T("Rozbaluji"), false, (st, ct) => Task.Run(() => FileOps.Extract(archive, plan, dest, opt, st, ct), ct), items.Count, source);
+            string? password = null;
+            if (FileOps.IsEncrypted(archive))
+            {
+                password = AskPassword(Path.GetFileName(archive));
+                if (password is null) return;
+            }
+            Enqueue(Loc.T("Rozbaluji"), false, (st, ct) => Task.Run(() => FileOps.Extract(archive, plan, dest, opt, st, ct, password), ct), items.Count, source);
         }
         else
         {
-            await RunOperation(move ? Loc.T("Přesouvám") : Loc.T("Kopíruji"), opt.Verify, async (st, ct) =>
+            Enqueue(move ? Loc.T("Přesouvám") : Loc.T("Kopíruji"), opt.Verify, async (st, ct) =>
             {
                 await FileOps.CopyAsync(items, dest, opt, st, ct);
                 if (move) await Task.Run(() => FileOps.Delete(items, recycle: false));
@@ -668,6 +686,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Rozbalí vybrané archivy do druhého panelu, každý do složky podle názvu archivu.</summary>
+    private string? AskPassword(string archiveName) =>
+        PasswordDialog.Ask(this, Loc.T("Zadej heslo k archivu:") + " " + archiveName);
+
     private async void Unpack_Click(object sender, RoutedEventArgs e)
     {
         if (_active.InArchive)
@@ -688,11 +709,19 @@ public partial class MainWindow : Window
         }
 
         var dest = Other.CurrentPath;
-        var plans = new List<(string Archive, string Target, List<FileOps.ExtractEntry> Plan)>();
+        var plans = new List<(string Archive, string Target, List<FileOps.ExtractEntry> Plan, string? Password)>();
         try
         {
             foreach (var a in archives)
-                plans.Add((a.FullPath, Path.Combine(dest, Path.GetFileNameWithoutExtension(a.Name)), FileOps.PlanAll(a.FullPath)));
+            {
+                string? pwd = null;
+                if (FileOps.IsEncrypted(a.FullPath))
+                {
+                    pwd = AskPassword(a.Name);
+                    if (pwd is null) return;
+                }
+                plans.Add((a.FullPath, Path.Combine(dest, Path.GetFileNameWithoutExtension(a.Name)), FileOps.PlanAll(a.FullPath, pwd), pwd));
+            }
         }
         catch (Exception ex)
         {
@@ -711,17 +740,17 @@ public partial class MainWindow : Window
 
         var opt = new CopyOptions(overwrite, false);
         var source = _active;
-        await RunOperation(Loc.T("Rozbaluji"), false, (st, ct) => Task.Run(() =>
+        Enqueue(Loc.T("Rozbaluji"), false, (st, ct) => Task.Run(() =>
         {
             foreach (var p in plans)
             {
                 Directory.CreateDirectory(p.Target);
-                FileOps.Extract(p.Archive, p.Plan, p.Target, opt, st, ct);
+                FileOps.Extract(p.Archive, p.Plan, p.Target, opt, st, ct, p.Password);
             }
         }, ct), archives.Count, source);
     }
 
-    private async void Pack_Click(object sender, RoutedEventArgs e)
+    private void Pack_Click(object sender, RoutedEventArgs e)
     {
         var items = _active.Selected;
         if (items.Count == 0) return;
@@ -730,19 +759,18 @@ public partial class MainWindow : Window
             StatusText.Text = Loc.T("Balit lze jen mezi běžnými složkami.");
             return;
         }
-        var folder = Path.GetFileName(_active.CurrentPath.TrimEnd('\\'));
-        var suggested = (items.Count == 1 ? Path.GetFileNameWithoutExtension(items[0].Name) : (folder.Length > 0 ? folder : "archiv")) + ".zip";
-        var name = Prompt(Loc.T("Vytvořit ZIP"), Loc.T("Název archivu:"), suggested);
-        if (string.IsNullOrWhiteSpace(name)) return;
-        name = name.Trim();
-        if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) name += ".zip";
-        var zipPath = Path.Combine(Other.CurrentPath, name);
-        if (File.Exists(zipPath) &&
-            MessageBox.Show(Loc.T("{0} už existuje. Přepsat?", name), Loc.T("Potvrzení"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        var folder = Path.GetFileName(_active.CurrentPath.TrimEnd((char)92));
+        var baseName = items.Count == 1 ? Path.GetFileNameWithoutExtension(items[0].Name) : (folder.Length > 0 ? folder : "archiv");
+        var request = new PackDialog(this, baseName).Ask();
+        if (request is null) return;
+
+        var path = Path.Combine(Other.CurrentPath, request.Name);
+        if (File.Exists(path) &&
+            MessageBox.Show(Loc.T("{0} už existuje. Přepsat?", request.Name), Loc.T("Potvrzení"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
         var source = _active;
-        await RunOperation(Loc.T("Balím"), false, (st, ct) => Task.Run(() => FileOps.PackZip(items, zipPath, st, ct), ct), items.Count, source);
+        Enqueue(Loc.T("Balím"), false, (st, ct) => Task.Run(() => FileOps.Pack(items, path, request.Format, request.Level, request.Password, st, ct), ct), items.Count, source);
     }
 
     private void View_Click(object sender, RoutedEventArgs e) => OpenViewer(edit: false);
@@ -782,7 +810,43 @@ public partial class MainWindow : Window
             MessageBox.Show(Loc.T("{0} už existuje. Přepsat?", Path.GetFileName(destFile)), Loc.T("Potvrzení"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
         var first = sel[0].FullPath;
-        await RunOperation(Loc.T("Spojuji"), false, (st, ct) => Task.Run(() => FileOps.Join(first, destFile, st, ct), ct), 1, _active);
+        Enqueue(Loc.T("Spojuji"), false, (st, ct) => Task.Run(() => FileOps.Join(first, destFile, st, ct), ct), 1, _active);
+    }
+
+    // ---- fronta úloh: další F5/F6/Alt+F5/Alt+F9 při běžící operaci se zařadí a poběží postupně ----
+
+    private sealed record QueuedJob(string Verb, bool Verify, Func<CopyStats, CancellationToken, Task> Work, int Count, FilePanel FocusBack);
+
+    private readonly Queue<QueuedJob> _queue = new();
+    private bool _queueRunning;
+
+    private void Enqueue(string verb, bool verify, Func<CopyStats, CancellationToken, Task> work, int count, FilePanel focusBack)
+    {
+        _queue.Enqueue(new QueuedJob(verb, verify, work, count, focusBack));
+        if (!_queueRunning) _ = ProcessQueue();
+    }
+
+    private async Task ProcessQueue()
+    {
+        _queueRunning = true;
+        try
+        {
+            while (_queue.Count > 0)
+            {
+                var job = _queue.Dequeue();
+                await RunOperation(job.Verb, job.Verify, job.Work, job.Count, job.FocusBack);
+            }
+        }
+        finally
+        {
+            _queueRunning = false;
+        }
+    }
+
+    private void ClearQueue()
+    {
+        _queue.Clear();
+        StatusText.Text = Loc.T("Fronta vyprázdněna.");
     }
 
     /// <summary>Společný průběh: stav, rychlost, zbývající čas, Esc, závěrečné shrnutí.</summary>
@@ -806,7 +870,7 @@ public partial class MainWindow : Window
             lastDone = done; lastSec = sec;
             var total = Math.Max(stats.Total, 1);
             var left = speed > 1 ? TimeSpan.FromSeconds((total - done) / speed) : TimeSpan.Zero;
-            StatusText.Text = (stats.Paused ? Loc.T("[PAUZA] ") : "") + $"{verb}: {Path.GetFileName(stats.Current)}  {100.0 * done / total:0}%  {speed / 1048576:0} MB/s  " + Loc.T("zbývá") + $" {left:mm\\:ss}  " + Loc.T("(P = pauza, Esc = zrušit)");
+            StatusText.Text = (stats.Paused ? Loc.T("[PAUZA] ") : "") + $"{verb}: {Path.GetFileName(stats.Current)}  {100.0 * done / total:0}%  {speed / 1048576:0} MB/s  " + Loc.T("zbývá") + $" {left:mm\\:ss}  " + Loc.T("(P = pauza, Esc = zrušit)") + (_queue.Count > 0 ? "  [" + Loc.T("ve frontě") + ": " + _queue.Count + "]" : "");
         };
         timer.Start();
 
@@ -831,12 +895,13 @@ public partial class MainWindow : Window
             _cts = null;
             LeftPanel.Refresh();
             RightPanel.Refresh();
-            focusBack.ListControl.Focus();
+            if (_zone == Zone.Panels && !MenuPopup.IsOpen) focusBack.ListControl.Focus();
         }
     }
 
     private void MkDir_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) { StatusText.Text = Loc.T("Při probíhající operaci nelze mazat ani vytvářet složky."); return; }
         if (_active.InArchive) { StatusText.Text = Loc.T("V archivu nelze měnit."); return; }
         var name = Prompt(Loc.T("Nová složka"), Loc.T("Název složky:"));
         if (string.IsNullOrWhiteSpace(name)) return;
@@ -850,6 +915,7 @@ public partial class MainWindow : Window
 
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) { StatusText.Text = Loc.T("Při probíhající operaci nelze mazat ani vytvářet složky."); return; }
         if (_active.InArchive) { StatusText.Text = Loc.T("V archivu nelze měnit."); return; }
         var items = _active.Selected;
         if (items.Count == 0) return;

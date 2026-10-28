@@ -225,6 +225,24 @@ public partial class FilePanel : UserControl
 
     private void OpenArchive(string file)
     {
+        if (FileOps.IsTarGzName(file))
+        {
+            try
+            {
+                _archiveEntries = FileOps.ListTarGz(file)
+                    .Select(r => new ArchiveRecord(r.Key, r.IsDir, r.Size, r.Mod))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, Loc.T("Nelze otevřít archiv"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            ArchiveFile = file;
+            _archiveDir = "";
+            ListArchive();
+            return;
+        }
         try
         {
             using var archive = ArchiveFactory.OpenArchive(file);
@@ -314,7 +332,7 @@ public partial class FilePanel : UserControl
         }
 
         if (item.IsDir) Navigate(item.FullPath);
-        else if (ArchiveExtensions.Contains(Path.GetExtension(item.Name), StringComparer.OrdinalIgnoreCase))
+        else if (FileOps.IsArchiveName(item.Name))
             OpenArchive(item.FullPath);
         else
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(item.FullPath) { UseShellExecute = true }); }
