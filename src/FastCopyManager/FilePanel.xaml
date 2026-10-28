@@ -1,19 +1,73 @@
 <UserControl x:Class="FastCopyManager.FilePanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <DockPanel>
-        <ComboBox DockPanel.Dock="Top" x:Name="DriveBox" SelectionChanged="DriveBox_SelectionChanged"/>
-        <TextBlock DockPanel.Dock="Top" x:Name="PathText" Padding="4,2" Background="#FF1E3A8A" Foreground="White"
-                   TextTrimming="CharacterEllipsis"/>
-        <ListView x:Name="List" SelectionMode="Extended" FontFamily="Consolas"
-                  MouseDoubleClick="List_MouseDoubleClick" PreviewKeyDown="List_PreviewKeyDown">
-            <ListView.View>
-                <GridView>
-                    <GridViewColumn Header="Název" Width="230" DisplayMemberBinding="{Binding Display}"/>
-                    <GridViewColumn Header="Velikost" Width="80" DisplayMemberBinding="{Binding SizeText}"/>
-                    <GridViewColumn Header="Změněno" Width="120" DisplayMemberBinding="{Binding DateText}"/>
-                </GridView>
-            </ListView.View>
-        </ListView>
-    </DockPanel>
+    <UserControl.Resources>
+        <!-- Norton Commander: modrý podklad, azurový rámeček, žlutý pruh kurzoru -->
+        <SolidColorBrush x:Key="NcBlue" Color="#FF0000AA"/>
+        <SolidColorBrush x:Key="NcCyan" Color="#FF55FFFF"/>
+        <SolidColorBrush x:Key="NcText" Color="#FFE8E8E8"/>
+        <SolidColorBrush x:Key="NcYellow" Color="#FFFFFF55"/>
+
+        <Style x:Key="NcItem" TargetType="ListViewItem">
+            <Setter Property="Foreground" Value="{StaticResource NcText}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="2,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListViewItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <GridViewRowPresenter Content="{TemplateBinding Content}"
+                                                  Columns="{TemplateBinding GridView.ColumnCollection}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#FFAAAA00"/>
+                                <Setter Property="Foreground" Value="Black"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True"/>
+                                    <Condition Property="Selector.IsSelectionActive" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource NcYellow}"/>
+                                <Setter Property="Foreground" Value="Black"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NcHeader" TargetType="GridViewColumnHeader">
+            <Setter Property="Background" Value="{StaticResource NcBlue}"/>
+            <Setter Property="Foreground" Value="{StaticResource NcYellow}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        </Style>
+    </UserControl.Resources>
+
+    <Border BorderBrush="{StaticResource NcCyan}" BorderThickness="2" Background="{StaticResource NcBlue}">
+        <DockPanel>
+            <TextBlock DockPanel.Dock="Top" x:Name="PathText" Padding="4,1" HorizontalAlignment="Center"
+                       Foreground="{StaticResource NcBlue}" Background="{StaticResource NcCyan}"
+                       TextTrimming="CharacterEllipsis"/>
+            <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource NcCyan}" BorderThickness="0,2,0,0">
+                <TextBlock x:Name="InfoText" Padding="4,1"
+                           Foreground="{StaticResource NcText}" TextTrimming="CharacterEllipsis"/>
+            </Border>
+            <ListView x:Name="List" SelectionMode="Extended"
+                      Background="{StaticResource NcBlue}" Foreground="{StaticResource NcText}" BorderThickness="0"
+                      ItemContainerStyle="{StaticResource NcItem}"
+                      SelectionChanged="List_SelectionChanged"
+                      MouseDoubleClick="List_MouseDoubleClick" PreviewKeyDown="List_PreviewKeyDown">
+                <ListView.View>
+                    <GridView ColumnHeaderContainerStyle="{StaticResource NcHeader}">
+                        <GridViewColumn Header="Name" Width="280" DisplayMemberBinding="{Binding Display}"/>
+                        <GridViewColumn Header="Size" Width="100" DisplayMemberBinding="{Binding SizeText}"/>
+                        <GridViewColumn Header="Date" Width="190" DisplayMemberBinding="{Binding DateText}"/>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+        </DockPanel>
+    </Border>
 </UserControl>

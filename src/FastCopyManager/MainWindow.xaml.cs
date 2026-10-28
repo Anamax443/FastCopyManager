@@ -16,9 +16,53 @@ public partial class MainWindow : Window
         var start = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         LeftPanel.Navigate(start);
         RightPanel.Navigate(start);
-        LeftPanel.GotKeyboardFocus += (_, _) => _active = LeftPanel;
-        RightPanel.GotKeyboardFocus += (_, _) => _active = RightPanel;
+        LeftPanel.GotKeyboardFocus += (_, _) => { _active = LeftPanel; UpdatePrompt(); };
+        RightPanel.GotKeyboardFocus += (_, _) => { _active = RightPanel; UpdatePrompt(); };
+        LeftPanel.PathChanged += (_, _) => UpdatePrompt();
+        RightPanel.PathChanged += (_, _) => UpdatePrompt();
+        BuildFKeyBar();
+        UpdatePrompt();
         Loaded += (_, _) => LeftPanel.ListControl.Focus();
+    }
+
+    private void UpdatePrompt() => PromptText.Text = _active.CurrentPath.TrimEnd('\\') + "\\>";
+
+    /// <summary>Spodní lišta F-kláves jako v Norton Commanderu: číslo bíle na černé, popisek černě na azurové.</summary>
+    private void BuildFKeyBar()
+    {
+        var keys = new (string Num, string Label, Action? Act)[]
+        {
+            ("1", "", null), ("2", "", null), ("3", "", null), ("4", "", null),
+            ("5", "Copy", () => Copy_Click(this, new RoutedEventArgs())),
+            ("6", "RenMov", () => Move_Click(this, new RoutedEventArgs())),
+            ("7", "Mkdir", () => MkDir_Click(this, new RoutedEventArgs())),
+            ("8", "Delete", () => Delete_Click(this, new RoutedEventArgs())),
+            ("9", "", null),
+            ("10", "Quit", Close),
+        };
+        foreach (var (num, label, act) in keys)
+        {
+            var cell = new DockPanel();
+            cell.Children.Add(new TextBlock { Text = num, Foreground = System.Windows.Media.Brushes.LightGray, Background = System.Windows.Media.Brushes.Black });
+            cell.Children.Add(new TextBlock
+            {
+                Text = label, Foreground = System.Windows.Media.Brushes.Black,
+                Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x00, 0xAA, 0xAA)),
+            });
+            if (act is not null)
+                cell.MouseLeftButtonUp += (_, _) => { if (!_busy) act(); };
+            FKeyBar.Children.Add(cell);
+        }
+    }
+
+    private void ChangeDrive(FilePanel panel)
+    {
+        var drives = string.Join(", ", DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => d.Name.TrimEnd('\\')));
+        var letter = Prompt("Disk", $"Písmeno disku ({drives}):");
+        if (string.IsNullOrWhiteSpace(letter)) return;
+        var path = letter.Trim().TrimEnd(':', '\\')[..1].ToUpperInvariant() + ":\\";
+        if (Directory.Exists(path)) panel.Navigate(path);
+        else StatusText.Text = $"Disk {path} není dostupný.";
     }
 
     private FilePanel Other => _active == LeftPanel ? RightPanel : LeftPanel;
@@ -31,6 +75,12 @@ public partial class MainWindow : Window
         if (_busy)
         {
             if (e.Key == Key.Escape) _cts?.Cancel();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.System && e.SystemKey is Key.F1 or Key.F2)
+        {
+            ChangeDrive(e.SystemKey == Key.F1 ? LeftPanel : RightPanel);
             e.Handled = true;
             return;
         }

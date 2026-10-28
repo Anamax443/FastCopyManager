@@ -7,28 +7,19 @@ namespace FastCopyManager;
 
 public partial class FilePanel : UserControl
 {
-    private bool _loadingDrives;
-
     public string CurrentPath { get; private set; } = "";
+
+    public event EventHandler? PathChanged;
 
     public FilePanel()
     {
         InitializeComponent();
-        LoadDrives();
     }
 
     public ListView ListControl => List;
 
     public IReadOnlyList<FileItem> Selected =>
         List.SelectedItems.Cast<FileItem>().Where(i => !i.IsParent).ToList();
-
-    public void LoadDrives()
-    {
-        _loadingDrives = true;
-        DriveBox.ItemsSource = DriveInfo.GetDrives().Where(d => d.IsReady)
-            .Select(d => $"{d.Name}  {d.VolumeLabel}").ToList();
-        _loadingDrives = false;
-    }
 
     public void Navigate(string path)
     {
@@ -45,11 +36,12 @@ public partial class FilePanel : UserControl
 
             var previous = CurrentPath;
             CurrentPath = dir.FullName;
-            PathText.Text = CurrentPath;
+            PathText.Text = " " + CurrentPath + " ";
             List.ItemsSource = items;
             var back = items.FirstOrDefault(i => i.FullPath.Equals(previous, StringComparison.OrdinalIgnoreCase));
             List.SelectedItem = back ?? items.FirstOrDefault();
             if (List.SelectedItem is not null) List.ScrollIntoView(List.SelectedItem);
+            PathChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
@@ -70,11 +62,11 @@ public partial class FilePanel : UserControl
             catch (Exception ex) { MessageBox.Show(ex.Message, "Nelze spustit"); }
     }
 
-    private void DriveBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void List_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_loadingDrives || DriveBox.SelectedItem is not string s) return;
-        Navigate(s[..3]);
-        List.Focus();
+        InfoText.Text = List.SelectedItem is FileItem { IsParent: false } i
+            ? $"{i.Name}  {i.SizeText}  {i.Modified:d-M-yy H:mm}"
+            : "";
     }
 
     private void List_MouseDoubleClick(object sender, MouseButtonEventArgs e)

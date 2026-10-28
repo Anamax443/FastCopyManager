@@ -29,3 +29,7 @@ dotnet build -c Release
 - publikuje se self-contained do složky, bez single-file a bez packerů (ty spouští antiviry),
 - z FAT/exFAT flashky se exe spouští bez značky „staženo z internetu“, takže SmartScreen většinou mlčí,
 - self-signed certifikát z `publish.ps1` je důvěryhodný jen na stroji, kde vznikl; trvalé řešení pro cizí PC je placený podpisový certifikát.
+
+## Písmo a licence
+
+Vzhled napodobuje Norton Commander (modrý podklad, azurový rámeček, žlutý kurzor, DOSové písmo). Použité písmo **MxPlus IBM VGA 8x16** je z balíku *The Ultimate Oldschool PC Font Pack* (VileR, https://int10h.org/oldschool-pc-fonts/), licence CC BY-SA 4.0, viz `src/FastCopyManager/Fonts/LICENSE-font-CC-BY-SA-4.0.txt`.

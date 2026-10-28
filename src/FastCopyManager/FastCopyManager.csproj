@@ -13,6 +13,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Resource Include="Fonts\MxPlus_IBM_VGA_8x16.ttf" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="System.IO.Hashing" Version="10.0.0" />
   </ItemGroup>
 
