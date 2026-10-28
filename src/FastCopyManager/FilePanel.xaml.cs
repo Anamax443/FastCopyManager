@@ -8,7 +8,7 @@ namespace FastCopyManager;
 
 public partial class FilePanel : UserControl
 {
-    private static readonly string[] ArchiveExtensions = { ".zip", ".rar", ".7z", ".tar" };
+    private static string[] ArchiveExtensions => FileOps.ArchiveExtensions;
 
     private sealed record ArchiveRecord(string Key, bool IsDir, long Size, DateTime Modified);
 
@@ -22,6 +22,9 @@ public partial class FilePanel : UserControl
     public bool InArchive => ArchiveFile is not null;
 
     public event EventHandler? PathChanged;
+
+    /// <summary>Šipka na okraji seznamu: předá řízení oknu (druhý panel, menu, příkazový řádek).</summary>
+    public event Action<NavDirection>? NavigateOut;
 
     public bool Brief { get; private set; }
 
@@ -57,22 +60,125 @@ public partial class FilePanel : UserControl
             if (List.SelectedItem is not null) List.ScrollIntoView(List.SelectedItem);
         });
 
-    /// <summary>V režimu Brief šipky vlevo/vpravo skáčou o celý sloupec.</summary>
-    private void MoveByColumn(int direction)
+    private int RowsPerColumn()
     {
-        if (List.Items.Count == 0) return;
         var probe = List.ItemContainerGenerator.ContainerFromIndex(0) as FrameworkElement;
         var rowHeight = probe is { ActualHeight: > 0 } ? probe.ActualHeight : 20;
-        var rows = Math.Max(1, (int)(List.ActualHeight / rowHeight) - 1);
-        var index = Math.Clamp(List.SelectedIndex + direction * rows, 0, List.Items.Count - 1);
+        return Math.Max(1, (int)(List.ActualHeight / rowHeight) - 1);
+    }
+
+    private void SelectIndex(int index)
+    {
         List.SelectedIndex = index;
         List.ScrollIntoView(List.SelectedItem);
         (List.ItemContainerGenerator.ContainerFromIndex(index) as UIElement)?.Focus();
     }
 
+    /// <summary>Šipky: uvnitř seznamu se pohybují, na okraji předají řízení dál. Vrací true, když klávesu zpracovala.</summary>
+    private bool HandleArrow(Key key)
+    {
+        var count = List.Items.Count;
+        var index = List.SelectedIndex;
+        switch (key)
+        {
+            case Key.Up when index <= 0:
+                NavigateOut?.Invoke(NavDirection.Up);
+                return true;
+            case Key.Down when index >= count - 1:
+                NavigateOut?.Invoke(NavDirection.Down);
+                return true;
+            case Key.Left or Key.Right when !Brief || count == 0:
+                NavigateOut?.Invoke(key == Key.Left ? NavDirection.Left : NavDirection.Right);
+                return true;
+            case Key.Left or Key.Right:
+                var rows = RowsPerColumn();
+                var column = index / rows;
+                var lastColumn = (count - 1) / rows;
+                if (key == Key.Left)
+                {
+                    if (column == 0) NavigateOut?.Invoke(NavDirection.Left);
+                    else SelectIndex(index - rows);
+                }
+                else
+                {
+                    if (column >= lastColumn) NavigateOut?.Invoke(NavDirection.Right);
+                    else SelectIndex(Math.Min(index + rows, count - 1));
+                }
+                return true;
+        }
+        return false;
+    }
+
     public FilePanel()
     {
         InitializeComponent();
+        List.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(Header_Click));
+        UpdateHeaders();
+    }
+
+    // ---- řazení: klik na hlavičku nebo Ctrl+F3 až F7 ----
+
+    public SortMode Sort { get; private set; } = SortMode.Name;
+    public bool SortDescending { get; private set; }
+
+    /// <summary>Řazení jako text pro uložení do nastavení, například "Size-" = podle velikosti sestupně.</summary>
+    public string SortSpec
+    {
+        get => Sort + (SortDescending ? "-" : "");
+        set
+        {
+            var text = value ?? "";
+            SortDescending = text.EndsWith('-');
+            Sort = Enum.TryParse<SortMode>(text.TrimEnd('-'), out var mode) ? mode : SortMode.Name;
+            UpdateHeaders();
+        }
+    }
+
+    /// <summary>Nastaví řazení; opakovaný výběr stejného řazení obrátí pořadí.</summary>
+    public void SetSort(SortMode mode)
+    {
+        SortDescending = mode == Sort ? !SortDescending && mode != SortMode.Unsorted : mode is SortMode.Time or SortMode.Size;
+        Sort = mode;
+        UpdateHeaders();
+        Refresh();
+    }
+
+    private void UpdateHeaders()
+    {
+        var arrow = SortDescending ? " ↓" : " ↑";
+        FullView.Columns[0].Header = "Name" + (Sort == SortMode.Name ? arrow : "");
+        FullView.Columns[1].Header = "Size" + (Sort == SortMode.Size ? arrow : "");
+        FullView.Columns[2].Header = "Date" + (Sort == SortMode.Time ? arrow : "");
+    }
+
+    private void Header_Click(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not GridViewColumnHeader { Column: { } column, Role: not GridViewColumnHeaderRole.Padding }) return;
+        SetSort(FullView.Columns.IndexOf(column) switch { 1 => SortMode.Size, 2 => SortMode.Time, _ => SortMode.Name });
+    }
+
+    /// <summary>Složky jsou vždy před soubory. Podle velikosti a přípony se složky řadí podle názvu.</summary>
+    private List<FileItem> Sorted(IEnumerable<FileItem> source, bool dirs)
+    {
+        var list = source.ToList();
+        if (Sort == SortMode.Unsorted) return list;
+
+        var cmp = StringComparer.CurrentCultureIgnoreCase;
+        var mode = dirs && Sort is SortMode.Size or SortMode.Extension ? SortMode.Name : Sort;
+        var desc = SortDescending && !(dirs && Sort is SortMode.Size or SortMode.Extension);
+
+        IEnumerable<FileItem> Order<TKey>(Func<FileItem, TKey> key, IComparer<TKey>? comparer = null) =>
+            desc
+                ? list.OrderByDescending(key, comparer).ThenBy(i => i.Name, cmp)
+                : list.OrderBy(key, comparer).ThenBy(i => i.Name, cmp);
+
+        return (mode switch
+        {
+            SortMode.Time => Order(i => i.Modified),
+            SortMode.Size => Order(i => i.Size),
+            SortMode.Extension => Order(i => Path.GetExtension(i.Name), cmp),
+            _ => Order(i => i.Name, cmp),
+        }).ToList();
     }
 
     public ListView ListControl => List;
@@ -88,10 +194,10 @@ public partial class FilePanel : UserControl
             var items = new List<FileItem>();
             if (dir.Parent is not null)
                 items.Add(new FileItem { Name = "..", FullPath = dir.Parent.FullName, IsDir = true, IsParent = true });
-            items.AddRange(dir.EnumerateDirectories().OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase)
-                .Select(d => new FileItem { Name = d.Name, FullPath = d.FullName, IsDir = true, Modified = d.LastWriteTime }));
-            items.AddRange(dir.EnumerateFiles().OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase)
-                .Select(f => new FileItem { Name = f.Name, FullPath = f.FullName, Size = f.Length, Modified = f.LastWriteTime }));
+            items.AddRange(Sorted(dir.EnumerateDirectories()
+                .Select(d => new FileItem { Name = d.Name, FullPath = d.FullName, IsDir = true, Modified = d.LastWriteTime }), dirs: true));
+            items.AddRange(Sorted(dir.EnumerateFiles()
+                .Select(f => new FileItem { Name = f.Name, FullPath = f.FullName, Size = f.Length, Modified = f.LastWriteTime }), dirs: false));
 
             var previous = CurrentPath;
             ArchiveFile = null;
@@ -112,7 +218,7 @@ public partial class FilePanel : UserControl
     public void Refresh()
     {
         if (InArchive) ListArchive();
-        else if (CurrentPath.Length > 0) Navigate(CurrentPath);
+        else if (CurrentPath.Length > 0) Navigate(CurrentPath, select: (List.SelectedItem as FileItem)?.FullPath);
     }
 
     // ---- archivy ----
@@ -153,8 +259,8 @@ public partial class FilePanel : UserControl
             else if (r.IsDir) dirs.TryAdd(rest, r.Modified);
             else files.Add(new FileItem { Name = rest, FullPath = r.Key, Size = r.Size, Modified = r.Modified });
         }
-        items.AddRange(dirs.Select(d => new FileItem { Name = d.Key, FullPath = _archiveDir + d.Key, IsDir = true, Modified = d.Value }));
-        items.AddRange(files.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase));
+        items.AddRange(Sorted(dirs.Select(d => new FileItem { Name = d.Key, FullPath = _archiveDir + d.Key, IsDir = true, Modified = d.Value }), dirs: true));
+        items.AddRange(Sorted(files, dirs: false));
 
         PathText.Text = " " + ArchiveFile + "\\" + _archiveDir.TrimEnd('/').Replace('/', '\\') + " ";
         List.ItemsSource = items;
@@ -231,10 +337,13 @@ public partial class FilePanel : UserControl
     {
         if (e.Key == Key.Enter && List.SelectedItem is FileItem item) { Open(item); e.Handled = true; }
         else if (e.Key == Key.Back) { GoUp(); e.Handled = true; }
-        else if (Brief && e.Key is Key.Left or Key.Right && Keyboard.Modifiers == ModifierKeys.None)
+        else if (Keyboard.Modifiers == ModifierKeys.None && e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
         {
-            MoveByColumn(e.Key == Key.Left ? -1 : 1);
-            e.Handled = true;
+            if (HandleArrow(e.Key)) e.Handled = true;
         }
     }
 }
+
+public enum NavDirection { Left, Right, Up, Down }
+
+public enum SortMode { Name, Extension, Time, Size, Unsorted }

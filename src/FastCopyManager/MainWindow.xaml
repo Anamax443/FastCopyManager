@@ -23,7 +23,7 @@
         <Border x:Name="MenuBarBorder" Grid.Row="0" Grid.ColumnSpan="2" Background="#FF00AAAA" Padding="8,1">
             <StackPanel x:Name="MenuBar" Orientation="Horizontal"/>
         </Border>
-        <Popup x:Name="MenuPopup" Grid.Row="0" Placement="Bottom" StaysOpen="False" Closed="MenuPopup_Closed"/>
+        <Popup x:Name="MenuPopup" Grid.Row="0" Placement="Bottom" StaysOpen="True" Closed="MenuPopup_Closed"/>
 
         <local:FilePanel x:Name="LeftPanel" Grid.Row="1" Grid.Column="0" Margin="0,0,1,0"/>
         <local:FilePanel x:Name="RightPanel" Grid.Row="1" Grid.Column="1" Margin="1,0,0,0"/>
@@ -35,7 +35,11 @@
                        Foreground="#FF55FFFF"/>
         </DockPanel>
 
-        <TextBlock Grid.Row="3" Grid.ColumnSpan="2" x:Name="PromptText" Padding="4,0" Foreground="#FFE8E8E8"/>
+        <DockPanel Grid.Row="3" Grid.ColumnSpan="2">
+            <TextBlock x:Name="PromptText" Padding="4,0,0,0" Foreground="#FFE8E8E8" VerticalAlignment="Center"/>
+            <TextBox x:Name="CommandBox" Background="Transparent" Foreground="#FFE8E8E8" CaretBrush="White"
+                     BorderThickness="0" Padding="0" VerticalAlignment="Center"/>
+        </DockPanel>
 
         <UniformGrid Grid.Row="4" Grid.ColumnSpan="2" x:Name="FKeyBar" Rows="1"/>
     </Grid>

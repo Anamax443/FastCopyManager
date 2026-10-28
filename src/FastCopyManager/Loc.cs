@@ -66,6 +66,8 @@ public static class Loc
         ["Některé soubory jsou větší než 4 GB a cíl je FAT32."] = "Some files are larger than 4 GB and the destination is FAT32.",
         ["Rozdělit je na části po 2 GB (.001, .002 ...)? Spojit je půjde přes Files > Join parts."] = "Split them into 2 GB parts (.001, .002 ...)? You can join them with Files > Join parts.",
         ["Balit lze jen mezi běžnými složkami."] = "Packing works only between regular folders.",
+        ["Rozbalovat lze jen do běžné složky."] = "Extracting works only into a regular folder.",
+        ["Vyber archiv (.zip, .rar, .7z, .tar)."] = "Select an archive (.zip, .rar, .7z, .tar).",
         ["Vytvořit ZIP"] = "Create ZIP",
         ["Název archivu:"] = "Archive name:",
         ["{0} už existuje. Přepsat?"] = "{0} already exists. Overwrite?",

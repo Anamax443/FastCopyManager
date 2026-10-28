@@ -15,10 +15,23 @@ public partial class MainWindow : Window
         _active = LeftPanel;
         LoadSettings();
         Closing += (_, _) => SaveSettings();
-        LeftPanel.GotKeyboardFocus += (_, _) => { _active = LeftPanel; UpdatePrompt(); };
-        RightPanel.GotKeyboardFocus += (_, _) => { _active = RightPanel; UpdatePrompt(); };
+        LeftPanel.GotKeyboardFocus += (_, _) => { _active = LeftPanel; UpdatePrompt(); SetZone(Zone.Panels); };
+        RightPanel.GotKeyboardFocus += (_, _) => { _active = RightPanel; UpdatePrompt(); SetZone(Zone.Panels); };
         LeftPanel.PathChanged += (_, _) => UpdatePrompt();
         RightPanel.PathChanged += (_, _) => UpdatePrompt();
+        LeftPanel.NavigateOut += d => OnPanelNavigateOut(LeftPanel, d);
+        RightPanel.NavigateOut += d => OnPanelNavigateOut(RightPanel, d);
+        CommandBox.GotKeyboardFocus += (_, _) => SetZone(Zone.CommandLine);
+        PreviewMouseDown += Window_PreviewMouseDown;
+        PreviewTextInput += Window_PreviewTextInput;
+        Deactivated += (_, _) => { if (MenuPopup.IsOpen) CloseMenu(false); };
+        Activated += (_, _) =>
+        {
+            if (!_refreshOnActivate || _busy) return;
+            _refreshOnActivate = false;
+            LeftPanel.Refresh();
+            RightPanel.Refresh();
+        };
         BuildFKeyBar();
         BuildMenus();
         UpdatePrompt();
@@ -40,7 +53,8 @@ public partial class MainWindow : Window
         var edit = new MenuEntry("Edit", "F4", () => Edit_Click(this, new RoutedEventArgs()));
         var copy = new MenuEntry("Copy", "F5", () => Copy_Click(this, new RoutedEventArgs()));
         var move = new MenuEntry("Rename or move", "F6", () => Move_Click(this, new RoutedEventArgs()));
-        var pack = new MenuEntry("Pack to ZIP", "Alt-F5", () => Pack_Click(this, new RoutedEventArgs()));
+        var unpack = new MenuEntry("Unpack archive", "F1", () => Unpack_Click(this, new RoutedEventArgs()));
+        var pack = new MenuEntry("Pack to ZIP", "F2", () => Pack_Click(this, new RoutedEventArgs()));
         var join = new MenuEntry("Join parts", "Alt-F6", () => Join_Click(this, new RoutedEventArgs()));
         var mkdir = new MenuEntry("Make directory", "F7", () => MkDir_Click(this, new RoutedEventArgs()));
         var del = new MenuEntry("Delete", "F8", () => Delete_Click(this, new RoutedEventArgs()));
@@ -52,30 +66,49 @@ public partial class MainWindow : Window
 
         _menus = new[]
         {
-            new MenuDef("Left", new[] { new MenuEntry("Brief", "Ctrl-F1", () => LeftPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F1", () => LeftPanel.SetBrief(false)), driveL, refresh }),
-            new MenuDef("Files", new[] { view, edit, copy, move, pack, join, mkdir, del, quit }),
+            new MenuDef("Left", new[] { new MenuEntry("Brief", "Ctrl-F1", () => LeftPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F1", () => LeftPanel.SetBrief(false)) }.Concat(SortEntries(LeftPanel)).Concat(new[] { driveL, refresh }).ToArray()),
+            new MenuDef("Files", new[] { view, edit, copy, move, unpack, pack, join, mkdir, del, quit }),
             new MenuDef("Disk", new[] { driveL, driveR }),
             new MenuDef("Commands", new[] { swap, refresh, new MenuEntry("Language CS/EN", "Ctrl-L", ToggleLanguage) }),
-            new MenuDef("Right", new[] { new MenuEntry("Brief", "Ctrl-F2", () => RightPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F2", () => RightPanel.SetBrief(false)), driveR, refresh }),
+            new MenuDef("Right", new[] { new MenuEntry("Brief", "Ctrl-F2", () => RightPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F2", () => RightPanel.SetBrief(false)) }.Concat(SortEntries(RightPanel)).Concat(new[] { driveR, refresh }).ToArray()),
         };
 
         for (var i = 0; i < _menus.Length; i++)
         {
             var idx = i;
             var title = _menus[i].Title;
-            var tb = new TextBlock { Foreground = System.Windows.Media.Brushes.Black, Margin = new Thickness(0, 0, 40, 0) };
+            var tb = new TextBlock { Foreground = System.Windows.Media.Brushes.Black, Margin = new Thickness(0, 0, 20, 0), Padding = new Thickness(6, 0, 6, 0) };
             tb.Inlines.Add(new System.Windows.Documents.Run(title[..1]) { Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFF, 0xFF, 0x55)) });
             tb.Inlines.Add(title[1..]);
-            tb.MouseLeftButtonDown += (_, e) => { if (!_busy) OpenMenu(idx); e.Handled = true; };
+            tb.MouseLeftButtonDown += (_, e) =>
+            {
+                if (!_busy)
+                {
+                    if (MenuPopup.IsOpen && _menuIndex == idx) CloseMenu(false);
+                    else OpenMenu(idx);
+                }
+                e.Handled = true;
+            };
             _menuHeaders.Add(tb);
             MenuBar.Children.Add(tb);
         }
     }
 
+    private static MenuEntry[] SortEntries(FilePanel panel) => new[]
+    {
+        new MenuEntry("Name", "Ctrl-F3", () => panel.SetSort(SortMode.Name)),
+        new MenuEntry("Extension", "Ctrl-F4", () => panel.SetSort(SortMode.Extension)),
+        new MenuEntry("Time", "Ctrl-F5", () => panel.SetSort(SortMode.Time)),
+        new MenuEntry("Size", "Ctrl-F6", () => panel.SetSort(SortMode.Size)),
+        new MenuEntry("Unsorted", "Ctrl-F7", () => panel.SetSort(SortMode.Unsorted)),
+    };
+
     private void OpenMenu(int index)
     {
         _menuIndex = (index + _menus.Length) % _menus.Length;
         _menuItem = 0;
+        _menuBarIndex = _menuIndex;
+        HighlightMenuBar(_menuIndex);
         RenderMenu();
         MenuPopup.PlacementTarget = _menuHeaders[_menuIndex];
         MenuPopup.IsOpen = true;
@@ -115,22 +148,212 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(act);
     }
 
-    private void MenuPopup_Closed(object? sender, EventArgs e) => _active.ListControl.Focus();
+    private void CloseMenu(bool keepMenuBar)
+    {
+        _keepMenuBar = keepMenuBar;
+        MenuPopup.IsOpen = false;
+    }
+
+    private void MenuPopup_Closed(object? sender, EventArgs e)
+    {
+        var keep = _keepMenuBar;
+        _keepMenuBar = false;
+        if (keep)
+        {
+            SetZone(Zone.MenuBar);
+            Keyboard.Focus(this);
+        }
+        else
+        {
+            SetZone(Zone.Panels);
+            _active.ListControl.Focus();
+        }
+    }
 
     private bool HandleMenuKey(Key key)
     {
         var items = _menus[_menuIndex].Items;
         switch (key)
         {
-            case Key.Up: _menuItem = (_menuItem - 1 + items.Length) % items.Length; RenderMenu(); break;
+            case Key.Up: if (_menuItem == 0) CloseMenu(true); else { _menuItem--; RenderMenu(); } break;
             case Key.Down: _menuItem = (_menuItem + 1) % items.Length; RenderMenu(); break;
             case Key.Left: OpenMenu(_menuIndex - 1); break;
             case Key.Right: OpenMenu(_menuIndex + 1); break;
             case Key.Enter: ExecuteMenu(_menuItem); break;
-            case Key.Escape or Key.F9: MenuPopup.IsOpen = false; break;
+            case Key.Escape or Key.F9: CloseMenu(false); break;
             default: return true;   // při otevřeném menu ostatní klávesy nepouštíme dál
         }
         return true;
+    }
+
+    // ---- zóny: panely, horní menu, příkazový řádek, dolní lišta (šipky mezi nimi) ----
+
+    private enum Zone { Panels, MenuBar, CommandLine, FKeys }
+
+    private static readonly System.Windows.Media.Brush FkTeal =
+        new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x00, 0xAA, 0xAA));
+
+    private Zone _zone = Zone.Panels;
+    private int _menuBarIndex;
+    private int _fkIndex = 4;   // F5 Copy
+    private readonly List<(TextBlock Label, Action? Act)> _fkeys = new();
+    private bool _refreshOnActivate;
+    private bool _keepMenuBar;
+
+    private void SetZone(Zone zone)
+    {
+        _zone = zone;
+        HighlightMenuBar(zone == Zone.MenuBar ? _menuBarIndex : (MenuPopup.IsOpen ? _menuIndex : -1));
+        HighlightFKeys(zone == Zone.FKeys ? _fkIndex : -1);
+    }
+
+    private void HighlightMenuBar(int index)
+    {
+        for (var i = 0; i < _menuHeaders.Count; i++)
+        {
+            var on = i == index;
+            _menuHeaders[i].Background = on ? System.Windows.Media.Brushes.Black : System.Windows.Media.Brushes.Transparent;
+            _menuHeaders[i].Foreground = on ? System.Windows.Media.Brushes.White : System.Windows.Media.Brushes.Black;
+        }
+    }
+
+    private void HighlightFKeys(int index)
+    {
+        for (var i = 0; i < _fkeys.Count; i++)
+            _fkeys[i].Label.Background = i == index ? System.Windows.Media.Brushes.White : FkTeal;
+    }
+
+    private void FocusPanels()
+    {
+        SetZone(Zone.Panels);
+        _active.ListControl.Focus();
+    }
+
+    private void OnPanelNavigateOut(FilePanel panel, NavDirection direction)
+    {
+        switch (direction)
+        {
+            case NavDirection.Left when panel == RightPanel: LeftPanel.ListControl.Focus(); break;
+            case NavDirection.Right when panel == LeftPanel: RightPanel.ListControl.Focus(); break;
+            case NavDirection.Up:
+                _menuBarIndex = panel == LeftPanel ? 0 : _menus.Length - 1;
+                SetZone(Zone.MenuBar);
+                Keyboard.Focus(this);
+                break;
+            case NavDirection.Down: CommandBox.Focus(); break;
+        }
+    }
+
+    /// <summary>Klávesy mimo panely (šipky, Enter, Esc). Vrací true, když je zpracovala.</summary>
+    private bool HandleZoneKey(KeyEventArgs e)
+    {
+        switch (_zone)
+        {
+            case Zone.MenuBar:
+                switch (e.Key)
+                {
+                    case Key.Left: MoveMenuBar(-1); return true;
+                    case Key.Right: MoveMenuBar(1); return true;
+                    case Key.Down or Key.Enter: OpenMenu(_menuBarIndex); return true;
+                    case Key.Up or Key.Escape: FocusPanels(); return true;
+                }
+                return false;
+
+            case Zone.CommandLine:
+                switch (e.Key)
+                {
+                    case Key.Up: FocusPanels(); return true;
+                    case Key.Escape: CommandBox.Clear(); FocusPanels(); return true;
+                    case Key.Down: SetZone(Zone.FKeys); Keyboard.Focus(this); return true;
+                    case Key.Enter: RunCommand(); return true;
+                }
+                return false;
+
+            case Zone.FKeys:
+                switch (e.Key)
+                {
+                    case Key.Left: MoveFKey(-1); return true;
+                    case Key.Right: MoveFKey(1); return true;
+                    case Key.Up: Keyboard.Focus(CommandBox); return true;
+                    case Key.Escape: FocusPanels(); return true;
+                    case Key.Enter:
+                        var act = _fkeys[_fkIndex].Act;
+                        FocusPanels();
+                        if (act is not null) Dispatcher.BeginInvoke(act);
+                        return true;
+                }
+                return false;
+        }
+        return false;
+    }
+
+    private void MoveMenuBar(int delta)
+    {
+        _menuBarIndex = (_menuBarIndex + delta + _menus.Length) % _menus.Length;
+        HighlightMenuBar(_menuBarIndex);
+    }
+
+    private void MoveFKey(int delta)
+    {
+        var enabled = Enumerable.Range(0, _fkeys.Count).Where(i => _fkeys[i].Act is not null).ToList();
+        var pos = enabled.IndexOf(_fkIndex);
+        _fkIndex = enabled[(pos + delta + enabled.Count) % enabled.Count];
+        HighlightFKeys(_fkIndex);
+    }
+
+    /// <summary>Příkazový řádek: spustí příkaz v cmd.exe v aktuální složce a nechá okno otevřené (pause).</summary>
+    private void RunCommand()
+    {
+        var text = CommandBox.Text.Trim();
+        if (text.Length == 0) { FocusPanels(); return; }
+        try
+        {
+            var quote = ((char)34).ToString();
+            var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+            {
+                Arguments = "/c " + quote + text + " & pause" + quote,
+                WorkingDirectory = Directory.Exists(_active.CurrentPath) ? _active.CurrentPath : Environment.CurrentDirectory,
+                UseShellExecute = true,
+            };
+            System.Diagnostics.Process.Start(psi);
+            CommandBox.Clear();
+            _refreshOnActivate = true;
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = Loc.T("Chyba: ") + ex.Message;
+        }
+        FocusPanels();
+    }
+
+    /// <summary>Psaní v panelu se přesměruje do příkazového řádku, jako v Norton Commanderu.</summary>
+    private void Window_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (_busy || MenuPopup.IsOpen || _zone != Zone.Panels || e.Text.Length != 1) return;
+        var c = e.Text[0];
+        if (!(char.IsLetterOrDigit(c) || c == (char)92 || "._-:~/$%&()+=,;@!#".IndexOf(c) >= 0)) return;
+        CommandBox.Focus();
+        CommandBox.AppendText(e.Text);
+        CommandBox.CaretIndex = CommandBox.Text.Length;
+        e.Handled = true;
+    }
+
+    /// <summary>Klik mimo rozbalené menu ho zavře (popup se zavírá ručně, aby nemizel hned po otevření).</summary>
+    private void Window_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!MenuPopup.IsOpen) return;
+        if (e.OriginalSource is DependencyObject src &&
+            (IsInside(src, MenuPopup.Child) || _menuHeaders.Any(h => IsInside(src, h))))
+            return;
+        CloseMenu(false);
+    }
+
+    private static bool IsInside(DependencyObject node, DependencyObject? root)
+    {
+        for (DependencyObject? d = node; d is not null;
+             d = d is System.Windows.Media.Visual ? System.Windows.Media.VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+            if (d == root) return true;
+        return false;
     }
 
     private void SwapPanels()
@@ -143,7 +366,7 @@ public partial class MainWindow : Window
 
     // ---- nastavení: poslední složky, cesty na flashce se ukládají relativně k disku s aplikací ----
 
-    private sealed record Settings(string? Left, string? Right, bool Verify, bool LeftBrief = false, bool RightBrief = false, string? Lang = null);
+    private sealed record Settings(string? Left, string? Right, bool Verify, bool LeftBrief = false, bool RightBrief = false, string? Lang = null, string? LeftSort = null, string? RightSort = null);
 
     private static readonly string SettingsPath = Path.Combine(AppContext.BaseDirectory, "settings.json");
     private static readonly string AppRoot = Path.GetPathRoot(AppContext.BaseDirectory) ?? "";
@@ -170,6 +393,8 @@ public partial class MainWindow : Window
         string Pick(string? saved) =>
             !string.IsNullOrEmpty(saved) && Directory.Exists(FromPortable(saved)) ? FromPortable(saved) : home;
 
+        LeftPanel.SortSpec = st?.LeftSort ?? "";
+        RightPanel.SortSpec = st?.RightSort ?? "";
         LeftPanel.Navigate(Pick(st?.Left));
         RightPanel.Navigate(Pick(st?.Right));
         if (st is not null)
@@ -184,7 +409,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            var st = new Settings(ToPortable(LeftPanel.CurrentPath), ToPortable(RightPanel.CurrentPath), VerifyBox.IsChecked == true, LeftPanel.Brief, RightPanel.Brief, Loc.Code);
+            var st = new Settings(ToPortable(LeftPanel.CurrentPath), ToPortable(RightPanel.CurrentPath), VerifyBox.IsChecked == true, LeftPanel.Brief, RightPanel.Brief, Loc.Code, LeftPanel.SortSpec, RightPanel.SortSpec);
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(st));
         }
         catch { /* flashka jen pro čtení, nic se neukládá */ }
@@ -210,7 +435,8 @@ public partial class MainWindow : Window
     {
         var keys = new (string Num, string Label, Action? Act)[]
         {
-            ("1", "", null), ("2", "", null),
+            ("1", "Unpack", () => Unpack_Click(this, new RoutedEventArgs())),
+            ("2", "Pack", () => Pack_Click(this, new RoutedEventArgs())),
             ("3", "View", () => View_Click(this, new RoutedEventArgs())),
             ("4", "Edit", () => Edit_Click(this, new RoutedEventArgs())),
             ("5", "Copy", () => Copy_Click(this, new RoutedEventArgs())),
@@ -224,11 +450,9 @@ public partial class MainWindow : Window
         {
             var cell = new DockPanel();
             cell.Children.Add(new TextBlock { Text = num, Foreground = System.Windows.Media.Brushes.LightGray, Background = System.Windows.Media.Brushes.Black });
-            cell.Children.Add(new TextBlock
-            {
-                Text = label, Foreground = System.Windows.Media.Brushes.Black,
-                Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x00, 0xAA, 0xAA)),
-            });
+            var lbl = new TextBlock { Text = label, Foreground = System.Windows.Media.Brushes.Black, Background = FkTeal };
+            cell.Children.Add(lbl);
+            _fkeys.Add((lbl, act));
             if (act is not null)
                 cell.MouseLeftButtonUp += (_, _) => { if (!_busy) act(); };
             FKeyBar.Children.Add(cell);
@@ -259,6 +483,24 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+        if (!_busy && Keyboard.Modifiers == ModifierKeys.None && HandleZoneKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
+        if (!_busy && Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.F3 or Key.F4 or Key.F5 or Key.F6 or Key.F7)
+        {
+            _active.SetSort(e.Key switch
+            {
+                Key.F3 => SortMode.Name,
+                Key.F4 => SortMode.Extension,
+                Key.F5 => SortMode.Time,
+                Key.F6 => SortMode.Size,
+                _ => SortMode.Unsorted,
+            });
+            e.Handled = true;
+            return;
+        }
         if (!_busy && Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.F1 or Key.F2)
         {
             var panel = e.Key == Key.F1 ? LeftPanel : RightPanel;
@@ -278,6 +520,12 @@ public partial class MainWindow : Window
         {
             if (e.Key == Key.Escape) _cts?.Cancel();
             else if (e.Key is Key.P or Key.Pause) _stats?.TogglePause();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.System && e.SystemKey == Key.F9)
+        {
+            Unpack_Click(this, e);
             e.Handled = true;
             return;
         }
@@ -302,6 +550,8 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Tab: Switch_Click(this, e); break;
+            case Key.F1: Unpack_Click(this, e); break;
+            case Key.F2: Pack_Click(this, e); break;
             case Key.F3: View_Click(this, e); break;
             case Key.F4: Edit_Click(this, e); break;
             case Key.F5: Copy_Click(this, e); break;
@@ -376,6 +626,60 @@ public partial class MainWindow : Window
                 if (move) await Task.Run(() => FileOps.Delete(items, recycle: false));
             }, items.Count, source);
         }
+    }
+
+    /// <summary>Rozbalí vybrané archivy do druhého panelu, každý do složky podle názvu archivu.</summary>
+    private async void Unpack_Click(object sender, RoutedEventArgs e)
+    {
+        if (_active.InArchive)
+        {
+            await Transfer(move: false);   // uvnitř archivu = rozbalit vybrané položky
+            return;
+        }
+        if (Other.InArchive)
+        {
+            StatusText.Text = Loc.T("Rozbalovat lze jen do běžné složky.");
+            return;
+        }
+        var archives = _active.Selected.Where(i => !i.IsDir && FileOps.IsArchiveName(i.Name)).ToList();
+        if (archives.Count == 0)
+        {
+            StatusText.Text = Loc.T("Vyber archiv (.zip, .rar, .7z, .tar).");
+            return;
+        }
+
+        var dest = Other.CurrentPath;
+        var plans = new List<(string Archive, string Target, List<FileOps.ExtractEntry> Plan)>();
+        try
+        {
+            foreach (var a in archives)
+                plans.Add((a.FullPath, Path.Combine(dest, Path.GetFileNameWithoutExtension(a.Name)), FileOps.PlanAll(a.FullPath)));
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = Loc.T("Chyba: ") + ex.Message;
+            return;
+        }
+
+        var overwrite = false;
+        if (plans.Any(p => FileOps.ExtractConflicts(p.Plan, p.Target)))
+        {
+            var r = MessageBox.Show(Loc.T("Některé položky v cíli už existují. Přepsat?") + Environment.NewLine + Loc.T("Ano = přepsat, Ne = přeskočit."),
+                Loc.T("Konflikt"), MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (r == MessageBoxResult.Cancel) return;
+            overwrite = r == MessageBoxResult.Yes;
+        }
+
+        var opt = new CopyOptions(overwrite, false);
+        var source = _active;
+        await RunOperation(Loc.T("Rozbaluji"), false, (st, ct) => Task.Run(() =>
+        {
+            foreach (var p in plans)
+            {
+                Directory.CreateDirectory(p.Target);
+                FileOps.Extract(p.Archive, p.Plan, p.Target, opt, st, ct);
+            }
+        }, ct), archives.Count, source);
     }
 
     private async void Pack_Click(object sender, RoutedEventArgs e)

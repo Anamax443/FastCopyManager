@@ -262,6 +262,23 @@ public static class FileOps
 
     // ---- archivy ----
 
+    public static readonly string[] ArchiveExtensions = { ".zip", ".rar", ".7z", ".tar" };
+
+    public static bool IsArchiveName(string name) =>
+        ArchiveExtensions.Contains(Path.GetExtension(name), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Všechny soubory archivu jako plán rozbalení do kořene cíle.</summary>
+    public static List<ExtractEntry> PlanAll(string archivePath)
+    {
+        using var archive = ArchiveFactory.OpenArchive(archivePath);
+        return archive.Entries
+            .Where(e => !e.IsDirectory)
+            .Select(e => NormalizeKey(e.Key ?? ""))
+            .Where(k => k.Length > 0)
+            .Select(k => new ExtractEntry(k, k))
+            .ToList();
+    }
+
     /// <summary>Jedna položka k rozbalení: klíč v archivu a relativní cílová cesta.</summary>
     public sealed record ExtractEntry(string Key, string Rel);
 
