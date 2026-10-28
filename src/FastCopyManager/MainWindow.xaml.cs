@@ -24,6 +24,11 @@ public partial class MainWindow : Window
         CommandBox.GotKeyboardFocus += (_, _) => SetZone(Zone.CommandLine);
         PreviewMouseDown += Window_PreviewMouseDown;
         PreviewTextInput += Window_PreviewTextInput;
+        PreviewKeyUp += (_, e) =>
+        {
+            if (e.Key == Key.System && e.SystemKey is Key.LeftAlt or Key.RightAlt) SetFKeyLabels(false);
+        };
+        Activated += (_, _) => SetFKeyLabels(Keyboard.Modifiers.HasFlag(ModifierKeys.Alt));
         Deactivated += (_, _) => { if (MenuPopup.IsOpen) CloseMenu(false); };
         Activated += (_, _) =>
         {
@@ -49,12 +54,13 @@ public partial class MainWindow : Window
 
     private void BuildMenus()
     {
+        var help = new MenuEntry("Help", "F1", () => Help_Click(this, new RoutedEventArgs()));
         var view = new MenuEntry("View", "F3", () => View_Click(this, new RoutedEventArgs()));
         var edit = new MenuEntry("Edit", "F4", () => Edit_Click(this, new RoutedEventArgs()));
         var copy = new MenuEntry("Copy", "F5", () => Copy_Click(this, new RoutedEventArgs()));
         var move = new MenuEntry("Rename or move", "F6", () => Move_Click(this, new RoutedEventArgs()));
-        var unpack = new MenuEntry("Unpack archive", "F1", () => Unpack_Click(this, new RoutedEventArgs()));
-        var pack = new MenuEntry("Pack to ZIP", "F2", () => Pack_Click(this, new RoutedEventArgs()));
+        var unpack = new MenuEntry("Unpack archive", "Alt-F9", () => Unpack_Click(this, new RoutedEventArgs()));
+        var pack = new MenuEntry("Pack to ZIP", "Alt-F5", () => Pack_Click(this, new RoutedEventArgs()));
         var join = new MenuEntry("Join parts", "Alt-F6", () => Join_Click(this, new RoutedEventArgs()));
         var mkdir = new MenuEntry("Make directory", "F7", () => MkDir_Click(this, new RoutedEventArgs()));
         var del = new MenuEntry("Delete", "F8", () => Delete_Click(this, new RoutedEventArgs()));
@@ -67,7 +73,7 @@ public partial class MainWindow : Window
         _menus = new[]
         {
             new MenuDef("Left", new[] { new MenuEntry("Brief", "Ctrl-F1", () => LeftPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F1", () => LeftPanel.SetBrief(false)) }.Concat(SortEntries(LeftPanel)).Concat(new[] { driveL, refresh }).ToArray()),
-            new MenuDef("Files", new[] { view, edit, copy, move, unpack, pack, join, mkdir, del, quit }),
+            new MenuDef("Files", new[] { help, view, edit, copy, move, unpack, pack, join, mkdir, del, quit }),
             new MenuDef("Disk", new[] { driveL, driveR }),
             new MenuDef("Commands", new[] { swap, refresh, new MenuEntry("Language CS/EN", "Ctrl-L", ToggleLanguage) }),
             new MenuDef("Right", new[] { new MenuEntry("Brief", "Ctrl-F2", () => RightPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F2", () => RightPanel.SetBrief(false)) }.Concat(SortEntries(RightPanel)).Concat(new[] { driveR, refresh }).ToArray()),
@@ -435,8 +441,8 @@ public partial class MainWindow : Window
     {
         var keys = new (string Num, string Label, Action? Act)[]
         {
-            ("1", "Unpack", () => Unpack_Click(this, new RoutedEventArgs())),
-            ("2", "Pack", () => Pack_Click(this, new RoutedEventArgs())),
+            ("1", "Help", () => Help_Click(this, new RoutedEventArgs())),
+            ("2", "", null),
             ("3", "View", () => View_Click(this, new RoutedEventArgs())),
             ("4", "Edit", () => Edit_Click(this, new RoutedEventArgs())),
             ("5", "Copy", () => Copy_Click(this, new RoutedEventArgs())),
@@ -452,11 +458,44 @@ public partial class MainWindow : Window
             cell.Children.Add(new TextBlock { Text = num, Foreground = System.Windows.Media.Brushes.LightGray, Background = System.Windows.Media.Brushes.Black });
             var lbl = new TextBlock { Text = label, Foreground = System.Windows.Media.Brushes.Black, Background = FkTeal };
             cell.Children.Add(lbl);
+            var fkIdx = _fkeys.Count;
             _fkeys.Add((lbl, act));
-            if (act is not null)
-                cell.MouseLeftButtonUp += (_, _) => { if (!_busy) act(); };
+            cell.MouseLeftButtonUp += (_, _) => { if (!_busy) _fkeys[fkIdx].Act?.Invoke(); };
             FKeyBar.Children.Add(cell);
         }
+        _fkNormal = keys.Select(k => (k.Label, k.Act)).ToArray();
+    }
+
+    private (string Label, Action? Act)[] _fkNormal = Array.Empty<(string, Action?)>();
+
+    /// <summary>Při podržení Alt ukáže lišta příkazy na Alt, jako v Norton Commanderu.</summary>
+    private (string Label, Action? Act)[] FkAlt() => new (string, Action?)[]
+    {
+        ("Left", () => ChangeDrive(LeftPanel)),
+        ("Right", () => ChangeDrive(RightPanel)),
+        ("", null), ("", null),
+        ("Pack", () => Pack_Click(this, new RoutedEventArgs())),
+        ("Join", () => Join_Click(this, new RoutedEventArgs())),
+        ("", null), ("", null),
+        ("Unpack", () => Unpack_Click(this, new RoutedEventArgs())),
+        ("", null),
+    };
+
+    private void SetFKeyLabels(bool alt)
+    {
+        if (_fkNormal.Length != _fkeys.Count) return;
+        var set = alt ? FkAlt() : _fkNormal;
+        for (var i = 0; i < _fkeys.Count; i++)
+        {
+            _fkeys[i].Label.Text = set[i].Label;
+            _fkeys[i] = (_fkeys[i].Label, set[i].Act);
+        }
+    }
+
+    private void Help_Click(object sender, RoutedEventArgs e)
+    {
+        new HelpWindow(this).ShowDialog();
+        _active.ListControl.Focus();
     }
 
     private void ChangeDrive(FilePanel panel)
@@ -477,6 +516,7 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.System && e.SystemKey is Key.LeftAlt or Key.RightAlt) SetFKeyLabels(true);
         if (MenuPopup.IsOpen)
         {
             HandleMenuKey(e.Key);
@@ -550,8 +590,7 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Tab: Switch_Click(this, e); break;
-            case Key.F1: Unpack_Click(this, e); break;
-            case Key.F2: Pack_Click(this, e); break;
+            case Key.F1: Help_Click(this, e); break;
             case Key.F3: View_Click(this, e); break;
             case Key.F4: Edit_Click(this, e); break;
             case Key.F5: Copy_Click(this, e); break;

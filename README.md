@@ -8,10 +8,12 @@ Dvoupanelový správce souborů pro Windows (WPF, .NET 10) ve stylu Norton Comma
 |---|---|
 | Tab | přepnout panel |
 | Enter / Backspace | otevřít (složku, archiv) / o úroveň výš |
+| F1 | nápověda (přehled kláves) |
 | F3 | prohlížeč (text, F4 přepne na hex) |
 | F4 | editor (F2 uloží, Esc zavře) |
 | F5 | kopírovat do druhého panelu (v archivu rozbalit) |
 | Alt+F5 | zabalit vybrané do ZIPu |
+| Alt+F9 | rozbalit vybraný archiv (zip, rar, 7z, tar) do druhého panelu |
 | F6 | přesunout |
 | Alt+F6 | spojit rozdělený soubor (.001, .002 ...) |
 | F7 | nová složka |
@@ -63,3 +65,5 @@ Poslední složky obou panelů, režim Brief a přepínač ověření se ukláda
 ## Jazyk (CS / EN)
 
 Aplikace mluví česky nebo anglicky. Při prvním spuštění se vybere podle jazyka Windows (česky jen na české lokalizaci, jinak anglicky), přepíná se přes Ctrl+L a volba se uloží do `settings.json`. Texty jsou v kódu česky a anglický překlad je ve slovníku `Loc.cs`; chybí-li překlad, použije se čeština. Názvy menu a F-kláves zůstávají anglicky jako v originálním Nortonu.
+
+Podržení **Alt** přepne dolní lištu na příkazy na Alt (Pack, Join, Unpack, změna disku).
