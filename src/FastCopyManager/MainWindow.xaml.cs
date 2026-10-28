@@ -23,8 +23,17 @@ public partial class MainWindow : Window
 
     private FilePanel Other => _active == LeftPanel ? RightPanel : LeftPanel;
 
+    private CancellationTokenSource? _cts;
+    private bool _busy;
+
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (_busy)
+        {
+            if (e.Key == Key.Escape) _cts?.Cancel();
+            e.Handled = true;
+            return;
+        }
         switch (e.Key)
         {
             case Key.Tab: Switch_Click(this, e); break;
@@ -65,15 +74,38 @@ public partial class MainWindow : Window
 
         var verb = move ? "Přesouvám" : "Kopíruji";
         var source = _active;
-        IsEnabled = false;
+        var stats = new CopyStats();
+        var opt = new CopyOptions(overwrite, VerifyBox.IsChecked == true);
+        _cts = new CancellationTokenSource();
+        _busy = true;
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        long lastDone = 0;
+        double lastSec = 0, speed = 0;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        timer.Tick += (_, _) =>
+        {
+            var done = stats.Done;
+            var sec = clock.Elapsed.TotalSeconds;
+            var inst = (done - lastDone) / Math.Max(sec - lastSec, 0.001);
+            speed = speed == 0 ? inst : speed * 0.7 + inst * 0.3;
+            lastDone = done; lastSec = sec;
+            var total = Math.Max(stats.Total, 1);
+            var left = speed > 1 ? TimeSpan.FromSeconds((total - done) / speed) : TimeSpan.Zero;
+            StatusText.Text = $"{verb}: {Path.GetFileName(stats.Current)}  {100.0 * done / total:0}%  {speed / 1048576:0} MB/s  zbývá {left:mm\\:ss}  (Esc = zrušit)";
+        };
+        timer.Start();
+
         try
         {
-            await Task.Run(() =>
-            {
-                FileOps.Copy(items, dest, overwrite, f => Dispatcher.Invoke(() => StatusText.Text = $"{verb}: {f}"), CancellationToken.None);
-                if (move) FileOps.Delete(items, recycle: false);
-            });
-            StatusText.Text = $"Hotovo ({items.Count} položek).";
+            await FileOps.CopyAsync(items, dest, opt, stats, _cts.Token);
+            if (move) await Task.Run(() => FileOps.Delete(items, recycle: false));
+            var mb = stats.Done / (opt.Verify ? 2.0 : 1.0) / 1048576;
+            StatusText.Text = $"Hotovo: {items.Count} položek, {mb:0.#} MB za {clock.Elapsed.TotalSeconds:0.0} s ({mb / Math.Max(clock.Elapsed.TotalSeconds, 0.001):0} MB/s){(opt.Verify ? ", ověřeno" : "")}.";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = "Zrušeno.";
         }
         catch (Exception ex)
         {
@@ -81,7 +113,9 @@ public partial class MainWindow : Window
         }
         finally
         {
-            IsEnabled = true;
+            timer.Stop();
+            _busy = false;
+            _cts = null;
             LeftPanel.Refresh();
             RightPanel.Refresh();
             source.ListControl.Focus();

@@ -18,7 +18,11 @@
         <local:FilePanel x:Name="LeftPanel" Grid.Row="0" Grid.Column="0" Margin="4,4,2,4"/>
         <local:FilePanel x:Name="RightPanel" Grid.Row="0" Grid.Column="1" Margin="2,4,4,4"/>
 
-        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" x:Name="StatusText" Padding="6,2" Text="Připraveno"/>
+        <DockPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="4,0">
+            <CheckBox DockPanel.Dock="Right" x:Name="VerifyBox" Content="Ověřit hashem" IsChecked="True"
+                      VerticalAlignment="Center" Focusable="False"/>
+            <TextBlock x:Name="StatusText" Padding="2" Text="Připraveno" TextTrimming="CharacterEllipsis"/>
+        </DockPanel>
 
         <UniformGrid Grid.Row="2" Grid.ColumnSpan="2" Rows="1" Margin="4">
             <Button Content="F5 Kopírovat" Click="Copy_Click" Focusable="False"/>
