@@ -1,27 +1,34 @@
-# Přenosný (self-contained) build pro flashku; na cílovém PC není potřeba .NET.
-# Publikuje FastCopyManager a podepíše exe self-signed certifikátem (jen pro vlastní stroje).
+# Přenosný build pro flashku: JEDEN soubor FastCopyManager.exe (self-contained, bez instalace .NET).
+# Uvnitř je i 7za.exe (7-Zip Extra) a písmo; nativní části WPF se při startu rozbalí do %TEMP%\.net.
+# Použití:  .\tools\publish.ps1            -> publish\FastCopyManager.exe
+#           .\tools\publish.ps1 -Sign      -> navíc podepíše self-signed certifikátem (jen pro vlastní stroje)
+param(
+    [switch] $Sign
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $out  = Join-Path $root 'publish'
 
-dotnet publish "$root\src\FastCopyManager\FastCopyManager.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o $out
+if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 
-# 7-Zip (7za.exe) pro vytváření 7z přímo z flashky, bez instalace; licence musí být přiložena.
-$tools = Join-Path $out 'Tools'
-New-Item -ItemType Directory -Force $tools | Out-Null
-$vendor = Join-Path $root 'third_party\7-Zip'
-Copy-Item "$vendor\7za.exe" $tools -Force
-Copy-Item "$vendor\License.txt" (Join-Path $tools '7-Zip-License.txt') -Force
-Copy-Item "$vendor\SOURCE.txt" (Join-Path $tools '7-Zip-SOURCE.txt') -Force
+dotnet publish "$root\src\FastCopyManager\FastCopyManager.csproj" -c Release -r win-x64 --self-contained true `
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
+    -p:DebugType=none -p:DebugSymbols=false -o $out
+if ($LASTEXITCODE -ne 0) { throw 'dotnet publish selhal.' }
 
-$subject = 'CN=FastCopyManager (AXIMA)'
-$cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object Subject -eq $subject | Select-Object -First 1
-if (-not $cert) {
-    $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $subject -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(5)
-    # důvěřovat certifikátu na tomto stroji (vyžaduje potvrzení)
-    $tmp = Join-Path $env:TEMP 'fcm.cer'
-    Export-Certificate -Cert $cert -FilePath $tmp | Out-Null
-    Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-    Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+$exe = Join-Path $out 'FastCopyManager.exe'
+"Hotovo: $exe ($([int]((Get-Item $exe).Length / 1MB)) MB), souborů ve složce: $((Get-ChildItem $out -File | Measure-Object).Count)"
+
+if ($Sign) {
+    $subject = 'CN=FastCopyManager (AXIMA)'
+    $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object Subject -eq $subject | Select-Object -First 1
+    if (-not $cert) {
+        $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $subject -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(5)
+        # důvěřovat certifikátu na tomto stroji (vyžaduje potvrzení)
+        $tmp = Join-Path $env:TEMP 'fcm.cer'
+        Export-Certificate -Cert $cert -FilePath $tmp | Out-Null
+        Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+        Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+    }
+    Set-AuthenticodeSignature -FilePath $exe -Certificate $cert -TimestampServer 'http://timestamp.digicert.com' | Format-List Status, StatusMessage
 }
-Set-AuthenticodeSignature -FilePath "$out\FastCopyManager.exe" -Certificate $cert -TimestampServer 'http://timestamp.digicert.com' | Format-List Status, StatusMessage

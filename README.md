@@ -36,12 +36,13 @@ Dvoupanelový správce souborů pro Windows (WPF, .NET 10) ve stylu Norton Comma
 ```powershell
 cd src\FastCopyManager
 dotnet build -c Release
-.\tools\publish.ps1     # přenosný self-contained build do publish\ + podpis
+.\tools\publish.ps1     # jeden soubor publish\FastCopyManager.exe (cca 64 MB), nic dalšího
 ```
 
-- publikuje se self-contained do složky, bez single-file a bez packerů (ty spouští antiviry),
-- z FAT/exFAT flashky se exe spouští bez značky „staženo z internetu“, takže SmartScreen většinou mlčí,
-- self-signed certifikát z `publish.ps1` je důvěryhodný jen na stroji, kde vznikl; trvalé řešení pro cizí PC je placený podpisový certifikát.
+- Výsledkem je **jediný soubor `FastCopyManager.exe`**: .NET, knihovny, písmo i 7za.exe jsou uvnitř. Na flashku stačí zkopírovat ten jeden soubor, na cílovém počítači se nic neinstaluje.
+- Při spuštění se nativní části WPF (cca 8 MB) rozbalí do `%TEMP%\.net\FastCopyManager` a 7za.exe (až při prvním použití 7z) do `%TEMP%\FastCopyManager\7-Zip`. Jinde se na počítači nic nezapisuje. První start trvá o chvíli déle (kolem 1-3 s), další jsou rychlé.
+- Nastavení se ukládá do podsložky `Data` vedle exe (`Data\settings.json`), takže v kořeni flashky zůstane jen exe a tahle složka. Na flashce jen pro čtení se nastavení prostě neuloží.
+- Exe je nepodepsané a velké, takže ho některé antiviry nebo firemní zásady mohou zablokovat. Z FAT/exFAT flashky se obvykle spouští bez značky „staženo z internetu“, takže SmartScreen většinou mlčí. Volitelný self-signed podpis (`-Sign`) je důvěryhodný jen na stroji, kde vznikl.
 
 ## Písmo a licence
 
@@ -79,14 +80,14 @@ Když běží kopírování a dáš další F5, F6, Alt+F5 nebo Alt+F9, nová ú
 
 ### 7z a RAR při balení
 
-ZIP (včetně hesla AES-256), TAR a TAR.GZ zapisuje aplikace sama. **7z** zapisuje přibalený **7za.exe** (7-Zip Extra) ve složce `Tools` vedle aplikace, takže funguje z flashky na jakémkoli počítači, bez instalace. **RAR** je uzavřený formát, který smí vytvářet jen WinRAR (`Rar.exe`, placený se zkušební dobou); ten aplikace nepřibaluje.
+ZIP (včetně hesla AES-256), TAR a TAR.GZ zapisuje aplikace sama. **7z** zapisuje **7za.exe** (7-Zip Extra), který je zabudovaný přímo v exe, takže funguje z flashky na jakémkoli počítači, bez instalace. **RAR** je uzavřený formát, který smí vytvářet jen WinRAR (`Rar.exe`, placený se zkušební dobou); ten aplikace neobsahuje.
 
-- 7z: použije se `Tools\7za.exe`, případně nainstalovaný 7-Zip (Program Files, PATH).
-- RAR: jen když je k dispozici `Rar.exe` (složka `Tools` vedle aplikace, WinRAR v Program Files nebo v PATH). Jinak dialog napíše, co chybí. Na cizím počítači bez WinRARu RAR vytvořit nelze; použij 7z nebo ZIP.
+- 7z: použije se `Tools\7za.exe` vedle exe (když existuje), jinak zabudovaný 7za.exe, nakonec nainstalovaný 7-Zip.
+- RAR: jen když je k dispozici `Rar.exe` (složka `Tools` vedle exe, WinRAR v Program Files nebo v PATH). Jinak dialog napíše, co chybí. Na cizím počítači bez WinRARu RAR vytvořit nelze; použij 7z nebo ZIP.
 - Rozbalování a prohlížení ZIP, RAR, 7z, TAR a TAR.GZ funguje vždy, bez externího nástroje.
 - U 7z a RAR se heslo předává nástroji na příkazové řádce, takže je po dobu balení viditelné ostatním procesům téhož uživatele.
 
 ### Použitý software třetích stran
 
-- **7-Zip Extra 26.05** (`7za.exe`), Copyright (C) 1999-2026 Igor Pavlov, licence GNU LGPL, zdrojový kód a informace: https://www.7-zip.org/. Binárka je nezměněná, licenční text je v `third_party/7-Zip/License.txt` a ve složce `Tools` (`7-Zip-License.txt`). Původ a otisk balíčku: `third_party/7-Zip/SOURCE.txt`.
+- **7-Zip Extra 26.05** (`7za.exe`), Copyright (C) 1999-2026 Igor Pavlov, licence GNU LGPL, zdrojový kód a informace: https://www.7-zip.org/. Binárka je nezměněná a zabudovaná v exe; licenční text je v `third_party/7-Zip/License.txt` a při rozbalení se ukládá vedle 7za.exe jako `7-Zip-License.txt`. Původ a otisk balíčku: `third_party/7-Zip/SOURCE.txt`.
 - Písmo MxPlus IBM VGA 8x16 (CC BY-SA 4.0), knihovny SharpCompress (MIT) a SharpZipLib (MIT).

@@ -546,8 +546,9 @@ public partial class MainWindow : Window
 
     private sealed record Settings(string? Left, string? Right, bool Verify, bool LeftBrief = false, bool RightBrief = false, string? Lang = null, string? LeftSort = null, string? RightSort = null);
 
-    private static readonly string SettingsPath = Path.Combine(AppContext.BaseDirectory, "settings.json");
-    private static readonly string AppRoot = Path.GetPathRoot(AppContext.BaseDirectory) ?? "";
+    private static readonly string SettingsPath = Path.Combine(AppPaths.DataDirectory, "settings.json");
+    private static readonly string LegacySettingsPath = Path.Combine(AppPaths.ExeDirectory, "settings.json");
+    private static readonly string AppRoot = Path.GetPathRoot(AppPaths.ExeDirectory) ?? "";
     private const string AppDrive = "<app>:";
 
     private static string ToPortable(string path) =>
@@ -562,7 +563,12 @@ public partial class MainWindow : Window
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         Settings? st = null;
-        try { st = System.Text.Json.JsonSerializer.Deserialize<Settings>(File.ReadAllText(SettingsPath)); }
+        try
+        {
+            // starší verze ukládaly settings.json přímo vedle exe
+            var file = File.Exists(SettingsPath) ? SettingsPath : LegacySettingsPath;
+            st = System.Text.Json.JsonSerializer.Deserialize<Settings>(File.ReadAllText(file));
+        }
         catch { /* první spuštění nebo poškozený soubor */ }
 
         Loc.Init(st?.Lang);
@@ -588,6 +594,7 @@ public partial class MainWindow : Window
         try
         {
             var st = new Settings(ToPortable(LeftPanel.CurrentPath), ToPortable(RightPanel.CurrentPath), VerifyBox.IsChecked == true, LeftPanel.Brief, RightPanel.Brief, Loc.Code, LeftPanel.SortSpec, RightPanel.SortSpec);
+            Directory.CreateDirectory(AppPaths.DataDirectory);
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(st));
         }
         catch { /* flashka jen pro čtení, nic se neukládá */ }

@@ -17,6 +17,12 @@
     <Resource Include="Fonts\MxPlus_IBM_VGA_8x16.ttf" />
   </ItemGroup>
 
+  <!-- 7za.exe (7-Zip Extra) a jeho licence: zabudované v aplikaci, aby stačil jediný exe na flashce -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\third_party\7-Zip\7za.exe" LogicalName="7za.exe" />
+    <EmbeddedResource Include="..\..\third_party\7-Zip\License.txt" LogicalName="7-Zip-License.txt" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="System.IO.Hashing" Version="10.0.0" />
     <PackageReference Include="SharpCompress" Version="0.50.7" />
