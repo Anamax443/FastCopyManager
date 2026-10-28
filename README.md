@@ -21,6 +21,7 @@ Dvoupanelový správce souborů pro Windows (WPF, .NET 10) ve stylu Norton Comma
 | Alt+F1 / Alt+F2 | změnit disk v levém / pravém panelu |
 | Ctrl+F1 / Ctrl+F2 | přepnout levý / pravý panel mezi plným výpisem a více sloupci (Brief) |
 | Ctrl+U / Ctrl+R | prohodit panely / znovu načíst |
+| Ctrl+L | přepnout jazyk CS / EN (také menu Commands > Language) |
 | P / Esc | během kopírování pozastavit / zrušit |
 
 ## Kopírovací jádro
@@ -58,3 +59,7 @@ Při kopírování souboru nad 4 GB na FAT32 se aplikace zeptá, jestli ho rozd�
 ## Nastavení
 
 Poslední složky obou panelů, režim Brief a přepínač ověření se ukládají do `settings.json` vedle exe. Cesty na stejném disku, odkud aplikace běží, se ukládají relativně, takže po změně písmene flashky platí dál. Na flashce jen pro čtení se nastavení prostě neuloží.
+
+## Jazyk (CS / EN)
+
+Aplikace mluví česky nebo anglicky. Při prvním spuštění se vybere podle jazyka Windows (česky jen na české lokalizaci, jinak anglicky), přepíná se přes Ctrl+L a volba se uloží do `settings.json`. Texty jsou v kódu česky a anglický překlad je ve slovníku `Loc.cs`; chybí-li překlad, použije se čeština. Názvy menu a F-kláves zůstávají anglicky jako v originálním Nortonu.

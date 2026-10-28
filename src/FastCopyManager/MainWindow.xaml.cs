@@ -55,7 +55,7 @@ public partial class MainWindow : Window
             new MenuDef("Left", new[] { new MenuEntry("Brief", "Ctrl-F1", () => LeftPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F1", () => LeftPanel.SetBrief(false)), driveL, refresh }),
             new MenuDef("Files", new[] { view, edit, copy, move, pack, join, mkdir, del, quit }),
             new MenuDef("Disk", new[] { driveL, driveR }),
-            new MenuDef("Commands", new[] { swap, refresh }),
+            new MenuDef("Commands", new[] { swap, refresh, new MenuEntry("Language CS/EN", "Ctrl-L", ToggleLanguage) }),
             new MenuDef("Right", new[] { new MenuEntry("Brief", "Ctrl-F2", () => RightPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F2", () => RightPanel.SetBrief(false)), driveR, refresh }),
         };
 
@@ -143,7 +143,7 @@ public partial class MainWindow : Window
 
     // ---- nastavení: poslední složky, cesty na flashce se ukládají relativně k disku s aplikací ----
 
-    private sealed record Settings(string? Left, string? Right, bool Verify, bool LeftBrief = false, bool RightBrief = false);
+    private sealed record Settings(string? Left, string? Right, bool Verify, bool LeftBrief = false, bool RightBrief = false, string? Lang = null);
 
     private static readonly string SettingsPath = Path.Combine(AppContext.BaseDirectory, "settings.json");
     private static readonly string AppRoot = Path.GetPathRoot(AppContext.BaseDirectory) ?? "";
@@ -164,6 +164,9 @@ public partial class MainWindow : Window
         try { st = System.Text.Json.JsonSerializer.Deserialize<Settings>(File.ReadAllText(SettingsPath)); }
         catch { /* první spuštění nebo poškozený soubor */ }
 
+        Loc.Init(st?.Lang);
+        ApplyLanguage();
+
         string Pick(string? saved) =>
             !string.IsNullOrEmpty(saved) && Directory.Exists(FromPortable(saved)) ? FromPortable(saved) : home;
 
@@ -181,10 +184,23 @@ public partial class MainWindow : Window
     {
         try
         {
-            var st = new Settings(ToPortable(LeftPanel.CurrentPath), ToPortable(RightPanel.CurrentPath), VerifyBox.IsChecked == true, LeftPanel.Brief, RightPanel.Brief);
+            var st = new Settings(ToPortable(LeftPanel.CurrentPath), ToPortable(RightPanel.CurrentPath), VerifyBox.IsChecked == true, LeftPanel.Brief, RightPanel.Brief, Loc.Code);
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(st));
         }
         catch { /* flashka jen pro čtení, nic se neukládá */ }
+    }
+
+    private void ApplyLanguage()
+    {
+        VerifyBox.Content = Loc.T("Ověřit hashem");
+        StatusText.Text = Loc.T("Připraveno");
+    }
+
+    private void ToggleLanguage()
+    {
+        Loc.Toggle();
+        ApplyLanguage();
+        StatusText.Text = Loc.T("Jazyk: čeština");
     }
 
     private void UpdatePrompt() => PromptText.Text = _active.CurrentPath.TrimEnd('\\') + "\\>";
@@ -222,11 +238,11 @@ public partial class MainWindow : Window
     private void ChangeDrive(FilePanel panel)
     {
         var drives = string.Join(", ", DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => d.Name.TrimEnd('\\')));
-        var letter = Prompt("Disk", $"Písmeno disku ({drives}):");
+        var letter = Prompt(Loc.T("Disk"), Loc.T("Písmeno disku ({0}):", drives));
         if (string.IsNullOrWhiteSpace(letter)) return;
         var path = letter.Trim().TrimEnd(':', '\\')[..1].ToUpperInvariant() + ":\\";
         if (Directory.Exists(path)) panel.Navigate(path);
-        else StatusText.Text = $"Disk {path} není dostupný.";
+        else StatusText.Text = Loc.T("Disk {0} není dostupný.", path);
     }
 
     private FilePanel Other => _active == LeftPanel ? RightPanel : LeftPanel;
@@ -250,9 +266,10 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (!_busy && Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R)
+        if (!_busy && Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R or Key.L)
         {
-            if (e.Key == Key.U) SwapPanels();
+            if (e.Key == Key.L) ToggleLanguage();
+            else if (e.Key == Key.U) SwapPanels();
             else { LeftPanel.Refresh(); RightPanel.Refresh(); }
             e.Handled = true;
             return;
@@ -309,18 +326,18 @@ public partial class MainWindow : Window
         if (items.Count == 0) return;
         if (Other.InArchive)
         {
-            StatusText.Text = "Do archivu nelze kopírovat. ZIP vytvoříš přes Alt+F5.";
+            StatusText.Text = Loc.T("Do archivu nelze kopírovat. ZIP vytvoříš přes Alt+F5.");
             return;
         }
         if (_active.InArchive && move)
         {
-            StatusText.Text = "Z archivu lze jen kopírovat (rozbalit).";
+            StatusText.Text = Loc.T("Z archivu lze jen kopírovat (rozbalit).");
             return;
         }
         var dest = Other.CurrentPath;
         if (!_active.InArchive && dest.Equals(_active.CurrentPath, StringComparison.OrdinalIgnoreCase))
         {
-            StatusText.Text = "Zdroj a cíl jsou stejná složka.";
+            StatusText.Text = Loc.T("Zdroj a cíl jsou stejná složka.");
             return;
         }
 
@@ -330,8 +347,8 @@ public partial class MainWindow : Window
         var overwrite = false;
         if (conflicts)
         {
-            var r = MessageBox.Show("Některé položky v cíli už existují. Přepsat?\nAno = přepsat, Ne = přeskočit.",
-                "Konflikt", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            var r = MessageBox.Show(Loc.T("Některé položky v cíli už existují. Přepsat?") + Environment.NewLine + Loc.T("Ano = přepsat, Ne = přeskočit."),
+                Loc.T("Konflikt"), MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
             if (r == MessageBoxResult.Cancel) return;
             overwrite = r == MessageBoxResult.Yes;
         }
@@ -339,8 +356,8 @@ public partial class MainWindow : Window
         var split = false;
         if (plan is null && FileOps.NeedsSplit(items, dest))
         {
-            var msg = "Některé soubory jsou větší než 4 GB a cíl je FAT32." + Environment.NewLine +
-                      "Rozdělit je na části po 2 GB (.001, .002 ...)? Spojit je půjde přes Files > Join parts.";
+            var msg = Loc.T("Některé soubory jsou větší než 4 GB a cíl je FAT32.") + Environment.NewLine +
+                      Loc.T("Rozdělit je na části po 2 GB (.001, .002 ...)? Spojit je půjde přes Files > Join parts.");
             if (MessageBox.Show(msg, "FAT32", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             split = true;
         }
@@ -349,11 +366,11 @@ public partial class MainWindow : Window
         if (plan is not null)
         {
             var archive = source.ArchiveFile!;
-            await RunOperation("Rozbaluji", false, (st, ct) => Task.Run(() => FileOps.Extract(archive, plan, dest, opt, st, ct), ct), items.Count, source);
+            await RunOperation(Loc.T("Rozbaluji"), false, (st, ct) => Task.Run(() => FileOps.Extract(archive, plan, dest, opt, st, ct), ct), items.Count, source);
         }
         else
         {
-            await RunOperation(move ? "Přesouvám" : "Kopíruji", opt.Verify, async (st, ct) =>
+            await RunOperation(move ? Loc.T("Přesouvám") : Loc.T("Kopíruji"), opt.Verify, async (st, ct) =>
             {
                 await FileOps.CopyAsync(items, dest, opt, st, ct);
                 if (move) await Task.Run(() => FileOps.Delete(items, recycle: false));
@@ -367,22 +384,22 @@ public partial class MainWindow : Window
         if (items.Count == 0) return;
         if (_active.InArchive || Other.InArchive)
         {
-            StatusText.Text = "Balit lze jen mezi běžnými složkami.";
+            StatusText.Text = Loc.T("Balit lze jen mezi běžnými složkami.");
             return;
         }
         var folder = Path.GetFileName(_active.CurrentPath.TrimEnd('\\'));
         var suggested = (items.Count == 1 ? Path.GetFileNameWithoutExtension(items[0].Name) : (folder.Length > 0 ? folder : "archiv")) + ".zip";
-        var name = Prompt("Vytvořit ZIP", "Název archivu:", suggested);
+        var name = Prompt(Loc.T("Vytvořit ZIP"), Loc.T("Název archivu:"), suggested);
         if (string.IsNullOrWhiteSpace(name)) return;
         name = name.Trim();
         if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) name += ".zip";
         var zipPath = Path.Combine(Other.CurrentPath, name);
         if (File.Exists(zipPath) &&
-            MessageBox.Show($"{name} už existuje. Přepsat?", "Potvrzení", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            MessageBox.Show(Loc.T("{0} už existuje. Přepsat?", name), Loc.T("Potvrzení"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
         var source = _active;
-        await RunOperation("Balím", false, (st, ct) => Task.Run(() => FileOps.PackZip(items, zipPath, st, ct), ct), items.Count, source);
+        await RunOperation(Loc.T("Balím"), false, (st, ct) => Task.Run(() => FileOps.PackZip(items, zipPath, st, ct), ct), items.Count, source);
     }
 
     private void View_Click(object sender, RoutedEventArgs e) => OpenViewer(edit: false);
@@ -390,7 +407,7 @@ public partial class MainWindow : Window
 
     private void OpenViewer(bool edit)
     {
-        if (_active.InArchive) { StatusText.Text = "Soubory z archivu nejdřív rozbal (F5)."; return; }
+        if (_active.InArchive) { StatusText.Text = Loc.T("Soubory z archivu nejdřív rozbal (F5)."); return; }
         if (_active.ListControl.SelectedItem is not FileItem { IsDir: false, IsParent: false } item) return;
         try
         {
@@ -398,7 +415,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = "Chyba: " + ex.Message;
+            StatusText.Text = Loc.T("Chyba: ") + ex.Message;
         }
         _active.Refresh();
         _active.ListControl.Focus();
@@ -408,21 +425,21 @@ public partial class MainWindow : Window
     {
         if (_active.InArchive || Other.InArchive)
         {
-            StatusText.Text = "Spojovat lze jen mezi běžnými složkami.";
+            StatusText.Text = Loc.T("Spojovat lze jen mezi běžnými složkami.");
             return;
         }
         var sel = _active.Selected;
         if (sel.Count != 1 || FileOps.SplitBaseName(sel[0].Name) is not { } baseName)
         {
-            StatusText.Text = "Vyber jednu část rozděleného souboru (.001, .002 ...).";
+            StatusText.Text = Loc.T("Vyber jednu část rozděleného souboru (.001, .002 ...).");
             return;
         }
         var destFile = Path.Combine(Other.CurrentPath, Path.GetFileName(baseName));
         if (File.Exists(destFile) &&
-            MessageBox.Show($"{Path.GetFileName(destFile)} už existuje. Přepsat?", "Potvrzení", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            MessageBox.Show(Loc.T("{0} už existuje. Přepsat?", Path.GetFileName(destFile)), Loc.T("Potvrzení"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
         var first = sel[0].FullPath;
-        await RunOperation("Spojuji", false, (st, ct) => Task.Run(() => FileOps.Join(first, destFile, st, ct), ct), 1, _active);
+        await RunOperation(Loc.T("Spojuji"), false, (st, ct) => Task.Run(() => FileOps.Join(first, destFile, st, ct), ct), 1, _active);
     }
 
     /// <summary>Společný průběh: stav, rychlost, zbývající čas, Esc, závěrečné shrnutí.</summary>
@@ -446,7 +463,7 @@ public partial class MainWindow : Window
             lastDone = done; lastSec = sec;
             var total = Math.Max(stats.Total, 1);
             var left = speed > 1 ? TimeSpan.FromSeconds((total - done) / speed) : TimeSpan.Zero;
-            StatusText.Text = $"{(stats.Paused ? "[PAUZA] " : "")}{verb}: {Path.GetFileName(stats.Current)}  {100.0 * done / total:0}%  {speed / 1048576:0} MB/s  zbývá {left:mm\\:ss}  (P = pauza, Esc = zrušit)";
+            StatusText.Text = (stats.Paused ? Loc.T("[PAUZA] ") : "") + $"{verb}: {Path.GetFileName(stats.Current)}  {100.0 * done / total:0}%  {speed / 1048576:0} MB/s  " + Loc.T("zbývá") + $" {left:mm\\:ss}  " + Loc.T("(P = pauza, Esc = zrušit)");
         };
         timer.Start();
 
@@ -454,15 +471,15 @@ public partial class MainWindow : Window
         {
             await work(stats, _cts.Token);
             var mb = stats.Done / (verify ? 2.0 : 1.0) / 1048576;
-            StatusText.Text = $"Hotovo: {count} položek, {mb:0.#} MB za {clock.Elapsed.TotalSeconds:0.0} s ({mb / Math.Max(clock.Elapsed.TotalSeconds, 0.001):0} MB/s){(verify ? ", ověřeno" : "")}.";
+            StatusText.Text = Loc.T("Hotovo: {0} položek, {1:0.#} MB za {2:0.0} s ({3:0} MB/s)", count, mb, clock.Elapsed.TotalSeconds, mb / Math.Max(clock.Elapsed.TotalSeconds, 0.001)) + (verify ? Loc.T(", ověřeno") : "") + ".";
         }
         catch (OperationCanceledException)
         {
-            StatusText.Text = "Zrušeno.";
+            StatusText.Text = Loc.T("Zrušeno.");
         }
         catch (Exception ex)
         {
-            StatusText.Text = "Chyba: " + ex.Message;
+            StatusText.Text = Loc.T("Chyba: ") + ex.Message;
         }
         finally
         {
@@ -477,33 +494,33 @@ public partial class MainWindow : Window
 
     private void MkDir_Click(object sender, RoutedEventArgs e)
     {
-        if (_active.InArchive) { StatusText.Text = "V archivu nelze měnit."; return; }
-        var name = Prompt("Nová složka", "Název složky:");
+        if (_active.InArchive) { StatusText.Text = Loc.T("V archivu nelze měnit."); return; }
+        var name = Prompt(Loc.T("Nová složka"), Loc.T("Název složky:"));
         if (string.IsNullOrWhiteSpace(name)) return;
         try
         {
             Directory.CreateDirectory(Path.Combine(_active.CurrentPath, name.Trim()));
             _active.Refresh();
         }
-        catch (Exception ex) { StatusText.Text = "Chyba: " + ex.Message; }
+        catch (Exception ex) { StatusText.Text = Loc.T("Chyba: ") + ex.Message; }
     }
 
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
-        if (_active.InArchive) { StatusText.Text = "V archivu nelze měnit."; return; }
+        if (_active.InArchive) { StatusText.Text = Loc.T("V archivu nelze měnit."); return; }
         var items = _active.Selected;
         if (items.Count == 0) return;
         var recycle = FileOps.HasRecycleBin(_active.CurrentPath);
-        var what = items.Count == 1 ? items[0].Name : $"{items.Count} položek";
-        var where = recycle ? "do koše" : "NATRVALO (tento disk nemá koš)";
-        if (MessageBox.Show($"Smazat {what} {where}?", "Potvrzení", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        var what = items.Count == 1 ? items[0].Name : Loc.T("{0} položek", items.Count);
+        var where = recycle ? Loc.T("do koše") : Loc.T("NATRVALO (tento disk nemá koš)");
+        if (MessageBox.Show(Loc.T("Smazat {0} {1}?", what, where), Loc.T("Potvrzení"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
         try
         {
             FileOps.Delete(items, recycle);
-            StatusText.Text = "Smazáno.";
+            StatusText.Text = Loc.T("Smazáno.");
         }
-        catch (Exception ex) { StatusText.Text = "Chyba: " + ex.Message; }
+        catch (Exception ex) { StatusText.Text = Loc.T("Chyba: ") + ex.Message; }
         _active.Refresh();
     }
 
@@ -511,7 +528,7 @@ public partial class MainWindow : Window
     {
         var box = new TextBox { Margin = new Thickness(0, 6, 0, 12), Text = initial };
         var ok = new Button { Content = "OK", Width = 80, IsDefault = true };
-        var cancel = new Button { Content = "Zrušit", Width = 80, IsCancel = true, Margin = new Thickness(8, 0, 0, 0) };
+        var cancel = new Button { Content = Loc.T("Zrušit"), Width = 80, IsCancel = true, Margin = new Thickness(8, 0, 0, 0) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         buttons.Children.Add(ok);
         buttons.Children.Add(cancel);

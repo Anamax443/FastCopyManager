@@ -51,7 +51,7 @@ public sealed class ViewerWindow : Window
 
         var info = new FileInfo(path);
         if (edit && info.Length > MaxTextBytes)
-            throw new IOException($"Soubor je pro editor příliš velký (limit {MaxTextBytes / 1048576} MB).");
+            throw new IOException(Loc.T("Soubor je pro editor příliš velký (limit {0} MB).", MaxTextBytes / 1048576));
 
         using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         {
@@ -76,7 +76,7 @@ public sealed class ViewerWindow : Window
         {
             Foreground = System.Windows.Media.Brushes.Black,
             Padding = new Thickness(6, 1, 6, 1),
-            Text = edit ? "F2 Uložit    Esc Zavřít" : "F4 Text/Hex    Esc Zavřít",
+            Text = edit ? Loc.T("F2 Uložit    Esc Zavřít") : Loc.T("F4 Text/Hex    Esc Zavřít"),
         };
         var keyBar = new Border { Background = Cyan, Child = keys };
         DockPanel.SetDock(keyBar, Dock.Bottom);
@@ -156,7 +156,7 @@ public sealed class ViewerWindow : Window
             }
             sb.Append('\n');
         }
-        if (n < _bytes.Length || _truncated) sb.Append("... (zobrazen jen začátek souboru)");
+        if (n < _bytes.Length || _truncated) sb.Append(Loc.T("... (zobrazen jen začátek souboru)"));
         _box.Text = sb.ToString();
         UpdateTitle();
     }
@@ -165,8 +165,8 @@ public sealed class ViewerWindow : Window
     {
         var mode = _edit ? "Edit" : _hex ? "Hex" : "Text";
         var enc = _edit || !_hex ? $"  [{_encoding.WebName}]" : "";
-        var trunc = _truncated && !_edit ? "  (jen prvních 4 MB)" : "";
-        _title.Text = $"{Path.GetFileName(_path)}  {mode}{enc}{trunc}{(_dirty ? "  *změněno*" : "")}";
+        var trunc = _truncated && !_edit ? Loc.T("  (jen prvních 4 MB)") : "";
+        _title.Text = $"{Path.GetFileName(_path)}  {mode}{enc}{trunc}{(_dirty ? Loc.T("  *změněno*") : "")}";
         Title = _title.Text;
     }
 
@@ -210,14 +210,14 @@ public sealed class ViewerWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Nelze uložit", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, ex.Message, Loc.T("Nelze uložit"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (!_edit || !_dirty) return;
-        var r = MessageBox.Show(this, "Soubor je změněný. Uložit?", "Editor", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        var r = MessageBox.Show(this, Loc.T("Soubor je změněný. Uložit?"), "Editor", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (r == MessageBoxResult.Cancel) e.Cancel = true;
         else if (r == MessageBoxResult.Yes) Save();
     }

@@ -105,7 +105,7 @@ public partial class FilePanel : UserControl
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
-            MessageBox.Show(ex.Message, "Nelze otevřít", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(ex.Message, Loc.T("Nelze otevřít"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -130,7 +130,7 @@ public partial class FilePanel : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Nelze otevřít archiv", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(ex.Message, Loc.T("Nelze otevřít archiv"), MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         ArchiveFile = file;
@@ -212,7 +212,7 @@ public partial class FilePanel : UserControl
             OpenArchive(item.FullPath);
         else
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(item.FullPath) { UseShellExecute = true }); }
-            catch (Exception ex) { MessageBox.Show(ex.Message, "Nelze spustit"); }
+            catch (Exception ex) { MessageBox.Show(ex.Message, Loc.T("Nelze spustit")); }
     }
 
     private void List_SelectionChanged(object sender, SelectionChangedEventArgs e)

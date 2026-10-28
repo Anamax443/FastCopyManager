@@ -50,7 +50,7 @@ public static class FileOps
     public static async Task CopyAsync(IEnumerable<FileItem> items, string destDir, CopyOptions opt, CopyStats stats, CancellationToken ct)
     {
         if (!Directory.Exists(destDir))
-            throw new IOException($"Cílová složka neexistuje: {destDir}");
+            throw new IOException(Loc.T("Cílová složka neexistuje: {0}", destDir));
 
         var jobs = new List<Job>();
         foreach (var item in items)
@@ -81,7 +81,7 @@ public static class FileOps
     private static void CheckDestination(string destDir, List<Job> jobs, CopyOptions opt)
     {
         if (!Directory.Exists(destDir))
-            throw new IOException($"Cílová složka neexistuje: {destDir}");
+            throw new IOException(Loc.T("Cílová složka neexistuje: {0}", destDir));
 
         var probe = Path.Combine(destDir, ".fcm_probe_" + Guid.NewGuid().ToString("N")[..8]);
         try
@@ -91,7 +91,7 @@ public static class FileOps
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
-            throw new IOException($"Do cíle nelze zapisovat (jen pro čtení nebo chybí oprávnění): {destDir}");
+            throw new IOException(Loc.T("Do cíle nelze zapisovat (jen pro čtení nebo chybí oprávnění): {0}", destDir));
         }
 
         var root = Path.GetPathRoot(Path.GetFullPath(destDir));
@@ -100,7 +100,7 @@ public static class FileOps
         var needed = jobs.Sum(j => j.Size) - (opt.Overwrite ? jobs.Where(j => File.Exists(j.Dst)).Sum(j => new FileInfo(j.Dst).Length) : 0);
         var free = new DriveInfo(root).AvailableFreeSpace;
         if (needed > free)
-            throw new IOException($"V cíli není dost místa: potřeba {needed / 1048576} MB, volno {free / 1048576} MB.");
+            throw new IOException(Loc.T("V cíli není dost místa: potřeba {0} MB, volno {1} MB.", needed / 1048576, free / 1048576));
     }
 
     // ---- FAT32: dělení souborů nad 4 GB a spojování ----
@@ -190,7 +190,7 @@ public static class FileOps
                     }
                 }
                 if (!hasher.GetCurrentHash().AsSpan().SequenceEqual(actual.GetCurrentHash()))
-                    throw new IOException($"Ověření selhalo (hash se neshoduje): {j.Src}");
+                    throw new IOException(Loc.T("Ověření selhalo (hash se neshoduje): {0}", j.Src));
             }
 
             for (var i = 0; i < tmps.Count; i++)
@@ -217,17 +217,17 @@ public static class FileOps
     /// <summary>Spojí části název.001, název.002 ... do jednoho souboru.</summary>
     public static void Join(string anyPart, string destFile, CopyStats stats, CancellationToken ct)
     {
-        var baseName = SplitBaseName(anyPart) ?? throw new IOException("Vyber soubor s příponou .001, .002 ...");
+        var baseName = SplitBaseName(anyPart) ?? throw new IOException(Loc.T("Vyber soubor s příponou .001, .002 ..."));
         var parts = new List<string>();
         for (var i = 1; File.Exists($"{baseName}.{i:000}"); i++) parts.Add($"{baseName}.{i:000}");
-        if (parts.Count == 0) throw new IOException("Nenalezena první část (.001).");
+        if (parts.Count == 0) throw new IOException(Loc.T("Nenalezena první část (.001)."));
 
         var total = parts.Sum(p => new FileInfo(p).Length);
         if (total > Fat32Limit && IsFat32(destFile))
-            throw new IOException("Spojený soubor by měl přes 4 GB a cíl je FAT32.");
+            throw new IOException(Loc.T("Spojený soubor by měl přes 4 GB a cíl je FAT32."));
         var root = Path.GetPathRoot(Path.GetFullPath(destFile));
         if (root is not null && new DriveInfo(root).AvailableFreeSpace < total)
-            throw new IOException($"V cíli není dost místa: potřeba {total / 1048576} MB.");
+            throw new IOException(Loc.T("V cíli není dost místa: potřeba {0} MB.", total / 1048576));
 
         stats.AddTotal(total);
         var tmp = destFile + ".fcm.tmp";
@@ -274,7 +274,7 @@ public static class FileOps
     public static void Extract(string archivePath, IReadOnlyList<ExtractEntry> plan, string destDir, CopyOptions opt, CopyStats stats, CancellationToken ct)
     {
         if (!Directory.Exists(destDir))
-            throw new IOException($"Cílová složka neexistuje: {destDir}");
+            throw new IOException(Loc.T("Cílová složka neexistuje: {0}", destDir));
 
         using var archive = ArchiveFactory.OpenArchive(archivePath);
         var map = new Dictionary<string, IArchiveEntry>();
@@ -288,7 +288,7 @@ public static class FileOps
             if (!map.TryGetValue(p.Key, out var entry)) continue;
             var dst = Path.GetFullPath(Path.Combine(destDir, p.Rel));
             if (!dst.StartsWith(destFull, StringComparison.OrdinalIgnoreCase))
-                throw new IOException($"Nebezpečná cesta v archivu: {p.Key}");
+                throw new IOException(Loc.T("Nebezpečná cesta v archivu: {0}", p.Key));
             jobs.Add(new Job(p.Key, dst, entry.Size, entry.LastModifiedTime ?? DateTime.Now));
         }
 
@@ -395,7 +395,7 @@ public static class FileOps
     {
         var srcFull = Path.GetFullPath(src).TrimEnd('\\') + "\\";
         if (Path.GetFullPath(dst).StartsWith(srcFull, StringComparison.OrdinalIgnoreCase))
-            throw new IOException("Nelze kopírovat složku sama do sebe.");
+            throw new IOException(Loc.T("Nelze kopírovat složku sama do sebe."));
 
         Directory.CreateDirectory(dst);
         var dir = new DirectoryInfo(src);
@@ -409,7 +409,7 @@ public static class FileOps
     {
         var split = f.Length > Fat32Limit && IsFat32(dst);
         if (split && !opt.Split)
-            throw new IOException($"Soubor {f.Name} je větší než 4 GB a cíl je FAT32.");
+            throw new IOException(Loc.T("Soubor {0} je větší než 4 GB a cíl je FAT32.", f.Name));
         if (!opt.Overwrite && File.Exists(split ? dst + ".001" : dst)) return;
         jobs.Add(new Job(f.FullName, dst, f.Length, f.LastWriteTime, split));
     }
@@ -511,7 +511,7 @@ public static class FileOps
             var expected = sourceHash.GetCurrentHash();
             var actual = HashFile(tmp, stats, ct);
             if (!expected.AsSpan().SequenceEqual(actual))
-                throw new IOException($"Ověření selhalo (hash se neshoduje): {j.Src}");
+                throw new IOException(Loc.T("Ověření selhalo (hash se neshoduje): {0}", j.Src));
         }
         File.SetLastWriteTime(tmp, j.Modified);
         File.Move(tmp, j.Dst, opt.Overwrite);
