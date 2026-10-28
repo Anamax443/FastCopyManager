@@ -108,7 +108,7 @@ public sealed class ViewerWindow : Window
         Loaded += (_, _) => _box.Focus();
     }
 
-    private static (Encoding, bool) DetectEncoding(byte[] b)
+    internal static (Encoding, bool) DetectEncoding(byte[] b)
     {
         if (b.Length >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) return (new UTF8Encoding(true), true);
         if (b.Length >= 2 && b[0] == 0xFF && b[1] == 0xFE) return (new UnicodeEncoding(false, true), true);

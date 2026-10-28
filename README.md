@@ -22,6 +22,7 @@ Dvoupanelový správce souborů pro Windows (WPF, .NET 10) ve stylu Norton Comma
 | F10 | konec |
 | Alt+F1 / Alt+F2 | změnit disk v levém / pravém panelu |
 | Ctrl+F1 / Ctrl+F2 | přepnout levý / pravý panel mezi plným výpisem a více sloupci (Brief) |
+| Ctrl+Q | náhled souboru (txt, md, log, kód ...) ve druhém panelu; Tab nebo šipka ho zavře |
 | Ctrl+U / Ctrl+R | prohodit panely / znovu načíst |
 | Ctrl+L | přepnout jazyk CS / EN (také menu Commands > Language) |
 | P / Esc | během kopírování pozastavit / zrušit |

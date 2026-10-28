@@ -27,12 +27,13 @@ Ctrl+F1/F2  Plný výpis / více sloupců (levý / pravý panel)
 Ctrl+F3     Řadit podle názvu        Ctrl+F4  podle přípony
 Ctrl+F5     Řadit podle času         Ctrl+F6  podle velikosti
 Ctrl+F7     Neřadit                  (opakování obrátí pořadí)
+Ctrl+Q      Náhled souboru (txt, md, log ...) ve druhém panelu; Tab nebo šipka ho zavře
 Ctrl+U      Prohodit panely
 Ctrl+R      Znovu načíst
 Ctrl+L      Jazyk CS / EN
 
 Tab         Druhý panel (také šipky vlevo / vpravo)
-Šipka nahoru z prvního řádku   horní menu
+Šipka nahoru z prvního řádku   horní menu (Enter rozbalí, šipka dolů zpět do panelu)
 Šipka dolů z posledního řádku  příkazový řádek a dolní lišta
 Enter       Otevřít složku; na .zip .rar .7z .tar otevře archiv jako složku
 Backspace   O úroveň výš
@@ -61,12 +62,13 @@ Ctrl+F1/F2  Full list / multi-column list (left / right panel)
 Ctrl+F3     Sort by name             Ctrl+F4  by extension
 Ctrl+F5     Sort by time             Ctrl+F6  by size
 Ctrl+F7     Unsorted                 (repeating reverses the order)
+Ctrl+Q      Quick view of the file (txt, md, log ...) in the other panel; Tab or an arrow closes it
 Ctrl+U      Swap panels
 Ctrl+R      Re-read
 Ctrl+L      Language CS / EN
 
 Tab         Other panel (also Left / Right arrows)
-Up arrow on the first row    top menu
+Up arrow on the first row    top menu (Enter opens it, Down returns to the panel)
 Down arrow on the last row   command line and bottom bar
 Enter       Open a folder; on .zip .rar .7z .tar opens the archive like a folder
 Backspace   Go up one level

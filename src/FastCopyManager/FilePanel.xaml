@@ -92,6 +92,7 @@
                 <TextBlock x:Name="InfoText" Padding="4,1"
                            Foreground="{StaticResource NcText}" TextTrimming="CharacterEllipsis"/>
             </Border>
+            <Grid>
             <ListView x:Name="List" SelectionMode="Extended" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       Background="{StaticResource NcBlue}" Foreground="{StaticResource NcText}" BorderThickness="0"
                       ItemContainerStyle="{StaticResource NcItem}"
@@ -105,6 +106,11 @@
                     </GridView>
                 </ListView.View>
             </ListView>
+                <TextBox x:Name="PreviewBox" IsReadOnly="True" Focusable="False" Visibility="Collapsed"
+                         Background="{StaticResource NcBlue}" Foreground="{StaticResource NcText}"
+                         BorderThickness="0" Padding="4,2" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
+            </Grid>
         </DockPanel>
     </Border>
 </UserControl>

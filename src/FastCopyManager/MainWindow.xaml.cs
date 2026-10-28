@@ -28,6 +28,8 @@ public partial class MainWindow : Window
         RightPanel.GotKeyboardFocus += (_, _) => { _active = RightPanel; UpdatePrompt(); SetZone(Zone.Panels); };
         LeftPanel.PathChanged += (_, _) => UpdatePrompt();
         RightPanel.PathChanged += (_, _) => UpdatePrompt();
+        LeftPanel.SelectionChangedOut += (_, _) => UpdatePreview();
+        RightPanel.SelectionChangedOut += (_, _) => UpdatePreview();
         LeftPanel.NavigateOut += d => OnPanelNavigateOut(LeftPanel, d);
         RightPanel.NavigateOut += d => OnPanelNavigateOut(RightPanel, d);
         CommandBox.GotKeyboardFocus += (_, _) => SetZone(Zone.CommandLine);
@@ -48,8 +50,13 @@ public partial class MainWindow : Window
         };
         BuildFKeyBar();
         BuildMenus();
+        // Lišta a horní menu musí umět převzít klávesový fokus, jinak by šipky zůstaly "uvízlé" v příkazovém řádku.
+        FKeyBar.Focusable = true;
+        FKeyBar.FocusVisualStyle = null;
+        MenuBar.Focusable = true;
+        MenuBar.FocusVisualStyle = null;
         UpdatePrompt();
-        Loaded += (_, _) => LeftPanel.ListControl.Focus();
+        Loaded += (_, _) => LeftPanel.FocusList();
     }
 
     // ---- horní menu (F9 nebo klik) ----
@@ -127,11 +134,12 @@ public partial class MainWindow : Window
         new MenuEntry("Unsorted", "Ctrl-F7", () => panel.SetSort(SortMode.Unsorted), () => panel.Sort == SortMode.Unsorted),
     };
 
-    private static MenuEntry[] PanelMenu(FilePanel panel, MenuEntry drive, MenuEntry refresh, string key) =>
+    private MenuEntry[] PanelMenu(FilePanel panel, MenuEntry drive, MenuEntry refresh, string key) =>
         new[]
         {
             new MenuEntry("Brief", key, () => panel.SetBrief(true), () => panel.Brief),
             new MenuEntry("Full", key, () => panel.SetBrief(false), () => !panel.Brief),
+            new MenuEntry("Quick view", "Ctrl-Q", () => ToggleQuickView(panel), () => panel.QuickView),
             MenuEntry.Separator,
         }
         .Concat(SortEntries(panel))
@@ -240,13 +248,13 @@ public partial class MainWindow : Window
         _keepMenuBar = false;
         if (keep)
         {
+            MenuBar.Focus();
             SetZone(Zone.MenuBar);
-            Keyboard.Focus(this);
         }
         else
         {
             SetZone(Zone.Panels);
-            _active.ListControl.Focus();
+            _active.FocusList();
         }
     }
 
@@ -326,19 +334,25 @@ public partial class MainWindow : Window
     private void FocusPanels()
     {
         SetZone(Zone.Panels);
-        _active.ListControl.Focus();
+        _active.FocusList();
     }
 
     private void OnPanelNavigateOut(FilePanel panel, NavDirection direction)
     {
         switch (direction)
         {
-            case NavDirection.Left when panel == RightPanel: LeftPanel.ListControl.Focus(); break;
-            case NavDirection.Right when panel == LeftPanel: RightPanel.ListControl.Focus(); break;
+            case NavDirection.Left when panel == RightPanel:
+                if (LeftPanel.QuickView) LeftPanel.SetQuickView(false);
+                LeftPanel.FocusList();
+                break;
+            case NavDirection.Right when panel == LeftPanel:
+                if (RightPanel.QuickView) RightPanel.SetQuickView(false);
+                RightPanel.FocusList();
+                break;
             case NavDirection.Up:
                 _menuBarIndex = panel == LeftPanel ? 0 : _menus.Length - 1;
+                MenuBar.Focus();
                 SetZone(Zone.MenuBar);
-                Keyboard.Focus(this);
                 break;
             case NavDirection.Down: CommandBox.Focus(); break;
         }
@@ -347,6 +361,8 @@ public partial class MainWindow : Window
     /// <summary>Klávesy mimo panely (šipky, Enter, Esc). Vrací true, když je zpracovala.</summary>
     private bool HandleZoneKey(KeyEventArgs e)
     {
+        // Podržená šipka nahoru/dolů nemá přeskakovat mezi zónami (příkazový řádek, lišta, menu).
+        if (_zone != Zone.Panels && e.IsRepeat && e.Key is Key.Up or Key.Down) return true;
         switch (_zone)
         {
             case Zone.MenuBar:
@@ -354,8 +370,8 @@ public partial class MainWindow : Window
                 {
                     case Key.Left: MoveMenuBar(-1); return true;
                     case Key.Right: MoveMenuBar(1); return true;
-                    case Key.Down or Key.Enter: OpenMenu(_menuBarIndex); return true;
-                    case Key.Up or Key.Escape: FocusPanels(); return true;
+                    case Key.Enter: OpenMenu(_menuBarIndex); return true;
+                    case Key.Down or Key.Up or Key.Escape: FocusPanels(); return true;
                 }
                 return false;
 
@@ -364,7 +380,7 @@ public partial class MainWindow : Window
                 {
                     case Key.Up: FocusPanels(); return true;
                     case Key.Escape: CommandBox.Clear(); FocusPanels(); return true;
-                    case Key.Down: SetZone(Zone.FKeys); Keyboard.Focus(this); return true;
+                    case Key.Down: FKeyBar.Focus(); SetZone(Zone.FKeys); return true;
                     case Key.Enter: RunCommand(); return true;
                 }
                 return false;
@@ -374,7 +390,7 @@ public partial class MainWindow : Window
                 {
                     case Key.Left: MoveFKey(-1); return true;
                     case Key.Right: MoveFKey(1); return true;
-                    case Key.Up: Keyboard.Focus(CommandBox); return true;
+                    case Key.Up: CommandBox.Focus(); SetZone(Zone.CommandLine); return true;
                     case Key.Escape: FocusPanels(); return true;
                     case Key.Enter:
                         var act = _fkeys[_fkIndex].Act;
@@ -454,6 +470,30 @@ public partial class MainWindow : Window
              d = d is System.Windows.Media.Visual ? System.Windows.Media.VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
             if (d == root) return true;
         return false;
+    }
+
+    /// <summary>Quick view: cílový panel ukazuje náhled souboru vybraného v druhém panelu.</summary>
+    private void ToggleQuickView(FilePanel target)
+    {
+        var source = target == LeftPanel ? RightPanel : LeftPanel;
+        if (target.QuickView)
+        {
+            target.SetQuickView(false);
+            return;
+        }
+        source.SetQuickView(false);
+        target.SetQuickView(true);
+        _active = source;
+        UpdatePreview();
+        source.FocusList();
+    }
+
+    private void UpdatePreview()
+    {
+        var viewer = LeftPanel.QuickView ? LeftPanel : RightPanel.QuickView ? RightPanel : null;
+        if (viewer is null) return;
+        var source = viewer == LeftPanel ? RightPanel : LeftPanel;
+        viewer.ShowPreview(source.ListControl.SelectedItem as FileItem, source.InArchive);
     }
 
     private void SwapPanels()
@@ -589,7 +629,7 @@ public partial class MainWindow : Window
     private void Help_Click(object sender, RoutedEventArgs e)
     {
         new HelpWindow(this).ShowDialog();
-        _active.ListControl.Focus();
+        _active.FocusList();
     }
 
     private void ChangeDrive(FilePanel panel)
@@ -642,9 +682,10 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R or Key.L)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R or Key.L or Key.Q)
         {
-            if (e.Key == Key.L) ToggleLanguage();
+            if (e.Key == Key.Q) ToggleQuickView(Other);
+            else if (e.Key == Key.L) ToggleLanguage();
             else if (e.Key == Key.U) SwapPanels();
             else { LeftPanel.Refresh(); RightPanel.Refresh(); }
             e.Handled = true;
@@ -705,7 +746,11 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void Switch_Click(object sender, RoutedEventArgs e) => Other.ListControl.Focus();
+    private void Switch_Click(object sender, RoutedEventArgs e)
+    {
+        if (Other.QuickView) Other.SetQuickView(false);
+        Other.FocusList();
+    }
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
     private async void Copy_Click(object sender, RoutedEventArgs e) => await Transfer(move: false);
     private async void Move_Click(object sender, RoutedEventArgs e) => await Transfer(move: true);
@@ -878,7 +923,7 @@ public partial class MainWindow : Window
             StatusText.Text = Loc.T("Chyba: ") + ex.Message;
         }
         _active.Refresh();
-        _active.ListControl.Focus();
+        _active.FocusList();
     }
 
     private async void Join_Click(object sender, RoutedEventArgs e)
@@ -984,7 +1029,7 @@ public partial class MainWindow : Window
             _cts = null;
             LeftPanel.Refresh();
             RightPanel.Refresh();
-            if (_zone == Zone.Panels && !MenuPopup.IsOpen) focusBack.ListControl.Focus();
+            if (_zone == Zone.Panels && !MenuPopup.IsOpen) focusBack.FocusList();
         }
     }
 

@@ -23,6 +23,78 @@ public partial class FilePanel : UserControl
 
     public event EventHandler? PathChanged;
 
+    /// <summary>Změna vybrané položky (druhý panel podle ní aktualizuje náhled).</summary>
+    public event EventHandler? SelectionChangedOut;
+
+    // ---- Quick view (Ctrl+Q): panel místo seznamu ukazuje náhled souboru z druhého panelu ----
+
+    private const int PreviewBytes = 128 * 1024;
+
+    public bool QuickView { get; private set; }
+
+    public void SetQuickView(bool on)
+    {
+        if (QuickView == on) return;
+        QuickView = on;
+        List.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        PreviewBox.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        InfoText.Text = "";
+        if (!on)
+        {
+            PreviewBox.Clear();
+            Refresh();   // vrátí seznam a titulek s cestou
+        }
+    }
+
+    public void ShowPreview(FileItem? item, bool fromArchive)
+    {
+        PathText.Text = " " + Loc.T("Náhled") + (item is { IsParent: false } ? ": " + item.Name : "") + " ";
+        PreviewBox.ScrollToHome();
+        if (item is null || item.IsParent) { PreviewBox.Text = ""; return; }
+
+        var date = item.Modified == default ? "" : item.Modified.ToString("dd.MM.yyyy HH:mm");
+        if (item.IsDir) { PreviewBox.Text = $"[{item.Name}]  <DIR>  {date}"; return; }
+        if (fromArchive) { PreviewBox.Text = Loc.T("Náhled v archivu není dostupný. Rozbal soubor (F5)."); return; }
+
+        try
+        {
+            byte[] bytes;
+            bool truncated;
+            using (var fs = new FileStream(item.FullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                var length = (int)Math.Min(fs.Length, PreviewBytes);
+                bytes = new byte[length];
+                var read = 0;
+                while (read < length)
+                {
+                    var n = fs.Read(bytes, read, length - read);
+                    if (n <= 0) break;
+                    read += n;
+                }
+                truncated = fs.Length > PreviewBytes;
+            }
+
+            // Binární soubor se pozná podle nulových bajtů na začátku.
+            var probe = Math.Min(bytes.Length, 4096);
+            for (var i = 0; i < probe; i++)
+            {
+                if (bytes[i] != 0) continue;
+                PreviewBox.Text = $"{item.Name}  {item.SizeText}  {date}" + Environment.NewLine + Environment.NewLine +
+                                  Loc.T("Binární soubor (náhled: F3, v něm F4 = hex).");
+                return;
+            }
+
+            var (encoding, hasBom) = ViewerWindow.DetectEncoding(bytes);
+            var offset = hasBom ? encoding.GetPreamble().Length : 0;
+            var text = encoding.GetString(bytes, offset, bytes.Length - offset);
+            PreviewBox.Text = truncated ? text + Environment.NewLine + Loc.T("... (zobrazen jen začátek souboru)") : text;
+        }
+        catch (Exception ex)
+        {
+            PreviewBox.Text = ex.Message;
+        }
+    }
+
     /// <summary>Šipka na okraji seznamu: předá řízení oknu (druhý panel, menu, příkazový řádek).</summary>
     public event Action<NavDirection>? NavigateOut;
 
@@ -31,6 +103,7 @@ public partial class FilePanel : UserControl
     /// <summary>Přepíná mezi plným výpisem (název, velikost, datum) a výpisem ve více sloupcích.</summary>
     public void SetBrief(bool brief)
     {
+        var refocus = IsKeyboardFocusWithin;
         Brief = brief;
         if (brief)
         {
@@ -50,15 +123,35 @@ public partial class FilePanel : UserControl
             ScrollViewer.SetHorizontalScrollBarVisibility(List, ScrollBarVisibility.Disabled);
             ScrollViewer.SetVerticalScrollBarVisibility(List, ScrollBarVisibility.Auto);
         }
-        ScrollToSelected();
+        ScrollToSelected(refocus);
     }
 
     /// <summary>Rolování až po dokončení rozložení, jinak se ve Brief režimu odroluje na špatné místo.</summary>
-    private void ScrollToSelected() =>
+    private void ScrollToSelected(bool refocus = false) =>
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
         {
-            if (List.SelectedItem is not null) List.ScrollIntoView(List.SelectedItem);
+            if (List.SelectedItem is null) return;
+            List.ScrollIntoView(List.SelectedItem);
+            if (refocus && List.Visibility == Visibility.Visible) FocusList();
         });
+
+    /// <summary>Fokus na vybraný řádek (ne na samotný seznam), aby první šipka hned pohnula kurzorem.</summary>
+    public void FocusList()
+    {
+        if (List.Visibility != Visibility.Visible) return;
+        if (List.SelectedItem is null) { List.Focus(); return; }
+
+        var container = List.ItemContainerGenerator.ContainerFromItem(List.SelectedItem) as UIElement;
+        if (container is null)
+        {
+            // řádek mimo viditelnou část ještě nemá vykreslený kontejner: nejdřív ho dorolovat
+            List.ScrollIntoView(List.SelectedItem);
+            List.UpdateLayout();
+            container = List.ItemContainerGenerator.ContainerFromItem(List.SelectedItem) as UIElement;
+        }
+        if (container is not null) container.Focus();
+        else List.Focus();
+    }
 
     private int RowsPerColumn()
     {
@@ -75,20 +168,26 @@ public partial class FilePanel : UserControl
     }
 
     /// <summary>Šipky: uvnitř seznamu se pohybují, na okraji předají řízení dál. Vrací true, když klávesu zpracovala.</summary>
-    private bool HandleArrow(Key key)
+    private bool HandleArrow(Key key, bool repeat)
     {
+        // Přechod do jiné části okna jen při novém stisku; při podržení klávesy se panel nepřeskakuje.
+        void Out(NavDirection direction)
+        {
+            if (!repeat) NavigateOut?.Invoke(direction);
+        }
+
         var count = List.Items.Count;
         var index = List.SelectedIndex;
         switch (key)
         {
             case Key.Up when index <= 0:
-                NavigateOut?.Invoke(NavDirection.Up);
+                Out(NavDirection.Up);
                 return true;
             case Key.Down when index >= count - 1:
-                NavigateOut?.Invoke(NavDirection.Down);
+                Out(NavDirection.Down);
                 return true;
             case Key.Left or Key.Right when !Brief || count == 0:
-                NavigateOut?.Invoke(key == Key.Left ? NavDirection.Left : NavDirection.Right);
+                Out(key == Key.Left ? NavDirection.Left : NavDirection.Right);
                 return true;
             case Key.Left or Key.Right:
                 var rows = RowsPerColumn();
@@ -96,12 +195,12 @@ public partial class FilePanel : UserControl
                 var lastColumn = (count - 1) / rows;
                 if (key == Key.Left)
                 {
-                    if (column == 0) NavigateOut?.Invoke(NavDirection.Left);
+                    if (column == 0) Out(NavDirection.Left);
                     else SelectIndex(index - rows);
                 }
                 else
                 {
-                    if (column >= lastColumn) NavigateOut?.Invoke(NavDirection.Right);
+                    if (column >= lastColumn) Out(NavDirection.Right);
                     else SelectIndex(Math.Min(index + rows, count - 1));
                 }
                 return true;
@@ -190,6 +289,7 @@ public partial class FilePanel : UserControl
     {
         try
         {
+            var refocus = IsKeyboardFocusWithin;
             var dir = new DirectoryInfo(path);
             var items = new List<FileItem>();
             if (dir.Parent is not null)
@@ -206,7 +306,7 @@ public partial class FilePanel : UserControl
             List.ItemsSource = items;
             var back = items.FirstOrDefault(i => i.FullPath.Equals(select ?? previous, StringComparison.OrdinalIgnoreCase));
             List.SelectedItem = back ?? items.FirstOrDefault();
-            ScrollToSelected();
+            ScrollToSelected(refocus);
             PathChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
@@ -264,6 +364,7 @@ public partial class FilePanel : UserControl
 
     private void ListArchive()
     {
+        var refocus = IsKeyboardFocusWithin;
         var items = new List<FileItem> { new() { Name = "..", FullPath = "..", IsDir = true, IsParent = true } };
         var dirs = new SortedDictionary<string, DateTime>(StringComparer.CurrentCultureIgnoreCase);
         var files = new List<FileItem>();
@@ -283,7 +384,7 @@ public partial class FilePanel : UserControl
         PathText.Text = " " + ArchiveFile + "\\" + _archiveDir.TrimEnd('/').Replace('/', '\\') + " ";
         List.ItemsSource = items;
         List.SelectedItem = items.Count > 1 ? items[1] : items[0];
-        ScrollToSelected();
+        ScrollToSelected(refocus);
         PathChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -344,6 +445,7 @@ public partial class FilePanel : UserControl
         InfoText.Text = List.SelectedItem is FileItem { IsParent: false } i
             ? $"{i.Name}  {i.SizeText}  {(i.Modified == default ? "" : i.Modified.ToString("d-M-yy H:mm"))}"
             : "";
+        SelectionChangedOut?.Invoke(this, EventArgs.Empty);
     }
 
     private void List_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -357,7 +459,7 @@ public partial class FilePanel : UserControl
         else if (e.Key == Key.Back) { GoUp(); e.Handled = true; }
         else if (Keyboard.Modifiers == ModifierKeys.None && e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
         {
-            if (HandleArrow(e.Key)) e.Handled = true;
+            if (HandleArrow(e.Key, e.IsRepeat)) e.Handled = true;
         }
     }
 }
