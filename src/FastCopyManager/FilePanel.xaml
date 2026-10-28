@@ -55,16 +55,16 @@
                 <TextBlock x:Name="InfoText" Padding="4,1"
                            Foreground="{StaticResource NcText}" TextTrimming="CharacterEllipsis"/>
             </Border>
-            <ListView x:Name="List" SelectionMode="Extended"
+            <ListView x:Name="List" SelectionMode="Extended" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       Background="{StaticResource NcBlue}" Foreground="{StaticResource NcText}" BorderThickness="0"
                       ItemContainerStyle="{StaticResource NcItem}"
                       SelectionChanged="List_SelectionChanged"
                       MouseDoubleClick="List_MouseDoubleClick" PreviewKeyDown="List_PreviewKeyDown">
                 <ListView.View>
                     <GridView ColumnHeaderContainerStyle="{StaticResource NcHeader}">
-                        <GridViewColumn Header="Name" Width="280" DisplayMemberBinding="{Binding Display}"/>
-                        <GridViewColumn Header="Size" Width="100" DisplayMemberBinding="{Binding SizeText}"/>
-                        <GridViewColumn Header="Date" Width="190" DisplayMemberBinding="{Binding DateText}"/>
+                        <GridViewColumn Header="Name" Width="210" DisplayMemberBinding="{Binding Display}"/>
+                        <GridViewColumn Header="Size" Width="90" DisplayMemberBinding="{Binding SizeText}"/>
+                        <GridViewColumn Header="Date" Width="150" DisplayMemberBinding="{Binding DateText}"/>
                     </GridView>
                 </ListView.View>
             </ListView>

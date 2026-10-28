@@ -19,12 +19,11 @@
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <!-- horní lišta: zatím jen vzhled, hotkey písmena žlutě -->
-        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="#FF00AAAA" Padding="8,1">
-            <TextBlock Foreground="Black">
-                <Run Foreground="#FFFFFF55">L</Run>eft&#160;&#160;&#160;&#160;<Run Foreground="#FFFFFF55">F</Run>iles&#160;&#160;&#160;&#160;<Run Foreground="#FFFFFF55">D</Run>isk&#160;&#160;&#160;&#160;<Run Foreground="#FFFFFF55">C</Run>ommands&#160;&#160;&#160;&#160;<Run Foreground="#FFFFFF55">R</Run>ight
-            </TextBlock>
+        <!-- horní menu: hotkey písmena žlutě, rozbalovací seznam řeší MainWindow.xaml.cs -->
+        <Border x:Name="MenuBarBorder" Grid.Row="0" Grid.ColumnSpan="2" Background="#FF00AAAA" Padding="8,1">
+            <StackPanel x:Name="MenuBar" Orientation="Horizontal"/>
         </Border>
+        <Popup x:Name="MenuPopup" Grid.Row="0" Placement="Bottom" StaysOpen="False" Closed="MenuPopup_Closed"/>
 
         <local:FilePanel x:Name="LeftPanel" Grid.Row="1" Grid.Column="0" Margin="0,0,1,0"/>
         <local:FilePanel x:Name="RightPanel" Grid.Row="1" Grid.Column="1" Margin="1,0,0,0"/>
