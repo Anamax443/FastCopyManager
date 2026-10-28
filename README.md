@@ -77,18 +77,11 @@ Alt+F5 otevře dialog: název, formát (ZIP, TAR.GZ nebo TAR), komprese (bez, ry
 
 ## Fronta
 
-Když běží kopírování a dáš další F5, F6, Alt+F5 nebo Alt+F9, nová úloha se zařadí do fronty a poběží po dokončení předchozí. Počet čekajících úloh je vidět ve stavovém řádku. Esc zruší běžící úlohu, Shift+Esc zruší i frontu, P pozastaví. Za běhu se dá dál procházet panely; mazání a vytváření složek je po dobu operace zakázané.
+Kopírování, přesun, balení i rozbalování běží na pozadí a okno zůstává volné. Další úlohy se řadí do fronty a běží postupně:
 
-### 7z a RAR při balení
-
-ZIP (včetně hesla AES-256), TAR a TAR.GZ zapisuje aplikace sama. **7z** zapisuje **7za.exe** (7-Zip Extra), který je zabudovaný přímo v exe, takže funguje z flashky na jakémkoli počítači, bez instalace. **RAR** je uzavřený formát, který smí vytvářet jen WinRAR (`Rar.exe`, placený se zkušební dobou); ten aplikace neobsahuje.
-
-- 7z: použije se `Tools\7za.exe` vedle exe (když existuje), jinak zabudovaný 7za.exe, nakonec nainstalovaný 7-Zip.
-- RAR: jen když je k dispozici `Rar.exe` (složka `Tools` vedle exe, WinRAR v Program Files nebo v PATH). Jinak dialog napíše, co chybí. Na cizím počítači bez WinRARu RAR vytvořit nelze; použij 7z nebo ZIP.
-- Rozbalování a prohlížení ZIP, RAR, 7z, TAR a TAR.GZ funguje vždy, bez externího nástroje.
-- U 7z a RAR se heslo předává nástroji na příkazové řádce, takže je po dobu balení viditelné ostatním procesům téhož uživatele.
-
-### Použitý software třetích stran
-
-- **7-Zip Extra 26.05** (`7za.exe`), Copyright (C) 1999-2026 Igor Pavlov, licence GNU LGPL, zdrojový kód a informace: https://www.7-zip.org/. Binárka je nezměněná a zabudovaná v exe; licenční text je v `third_party/7-Zip/License.txt` a při rozbalení se ukládá vedle 7za.exe jako `7-Zip-License.txt`. Původ a otisk balíčku: `third_party/7-Zip/SOURCE.txt`.
-- Písmo MxPlus IBM VGA 8x16 (CC BY-SA 4.0), knihovny SharpCompress (MIT) a SharpZipLib (MIT).
+- **F5 / F6 / Alt+F5 / Alt+F9** spustí úlohu hned; když už něco běží, další se zařadí na konec. Po zařazení se výběr uvolní (zůstane jen položka pod kurzorem), takže jde hned vybírat další soubory a složky, i z jiných složek.
+- Fronta je vidět nad stavovým řádkem: co běží a co čeká (číslovaně). Stejnou úlohu dvakrát po sobě zařadit nejde.
+- **Shift+F5 / Shift+F6** úlohu jen zařadí a počká, **Ctrl+Enter** (nebo Commands > Start queue) frontu spustí. Hodí se, když chceš nejdřív nasbírat víc věcí a pak je pustit najednou.
+- **Esc** zruší běžící úlohu, **Shift+Esc** i frontu (Commands > Clear queue), **P** pozastaví.
+- Chyby úloh se nepřepisují zprávou o další úloze, po doběhnutí fronty se ukážou všechny najednou v okně.
+- Mazání a vytváření složek je po dobu operace zakázané; procházení panelů, náhled i výběr dalších souborů ne. Při zavření okna za běhu se aplikace zeptá.

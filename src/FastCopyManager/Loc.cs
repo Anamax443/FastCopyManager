@@ -58,7 +58,6 @@ public static class Loc
         // dialogy a zprávy v hlavním okně
         ["Písmeno disku ({0}) nebo síťová cesta:"] = "Drive letter ({0}) or network path:",
         ["Cesta nedostupná (vypršel čas): {0}"] = "Path unavailable (timed out): {0}",
-        ["Disk {0} není dostupný."] = "Drive {0} is not available.",
         ["Do archivu nelze kopírovat. ZIP vytvoříš přes Alt+F5."] = "Cannot copy into an archive. Create a ZIP with Alt+F5.",
         ["Z archivu lze jen kopírovat (rozbalit)."] = "From an archive you can only copy (extract).",
         ["Zdroj a cíl jsou stejná složka."] = "Source and destination are the same folder.",
@@ -68,6 +67,10 @@ public static class Loc
         ["Rozdělit je na části po 2 GB (.001, .002 ...)? Spojit je půjde přes Files > Join parts."] = "Split them into 2 GB parts (.001, .002 ...)? You can join them with Files > Join parts.",
         ["Balit lze jen mezi běžnými složkami."] = "Packing works only between regular folders.",
         ["Zabalit"] = "Pack",
+        ["Zařazeno do fronty ({0}). Spustíš ji Ctrl+Enter."] = "Added to the queue ({0}). Start it with Ctrl+Enter.",
+        ["Fronta čeká na spuštění (Ctrl+Enter)"] = "Queue is waiting to start (Ctrl+Enter)",
+        ["Už je ve frontě: {0}"] = "Already queued: {0}",
+        ["Chyby při zpracování"] = "Errors during processing",
         ["Cesta nenalezena: {0}"] = "Path not found: {0}",
         ["Náhled"] = "Quick view",
         ["Náhled v archivu není dostupný. Rozbal soubor (F5)."] = "Preview inside an archive is not available. Extract the file (F5).",

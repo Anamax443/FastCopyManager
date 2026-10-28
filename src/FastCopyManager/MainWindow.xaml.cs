@@ -51,6 +51,7 @@ public partial class MainWindow : Window
             LeftPanel.Refresh();
             RightPanel.Refresh();
         };
+        _showJobErrors = text => MessageBox.Show(this, text, Loc.T("Chyby při zpracování"), MessageBoxButton.OK, MessageBoxImage.Warning);
         BuildFKeyBar();
         BuildMenus();
         // Lišta a horní menu musí umět převzít klávesový fokus, jinak by šipky zůstaly "uvízlé" v příkazovém řádku.
@@ -105,6 +106,7 @@ public partial class MainWindow : Window
             {
                 swap, refresh, MenuEntry.Separator,
                 new MenuEntry("Language CS/EN", "Ctrl-L", ToggleLanguage),
+                new MenuEntry("Start queue", "Ctrl-Enter", StartQueue),
                 new MenuEntry("Clear queue", "Shift-Esc", ClearQueue),
             }),
             new MenuDef("Right", PanelMenu(RightPanel, driveR, refresh, "Ctrl-F2")),
@@ -769,9 +771,10 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R or Key.L or Key.Q or Key.G)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R or Key.L or Key.Q or Key.G or Key.Enter)
         {
-            if (e.Key == Key.G) _active.BeginPathEdit();
+            if (e.Key == Key.Enter) StartQueue();
+            else if (e.Key == Key.G) _active.BeginPathEdit();
             else if (e.Key == Key.Q) ToggleQuickView(Other);
             else if (e.Key == Key.L) ToggleLanguage();
             else if (e.Key == Key.U) SwapPanels();
@@ -901,7 +904,7 @@ public partial class MainWindow : Window
                 password = AskPassword(Path.GetFileName(archive));
                 if (password is null) return;
             }
-            Enqueue(Loc.T("Rozbaluji"), false, (st, ct) => Task.Run(() => FileOps.Extract(archive, plan, dest, opt, st, ct, password), ct), items.Count, source);
+            Enqueue(Loc.T("Rozbaluji"), false, (st, ct) => Task.Run(() => FileOps.Extract(archive, plan, dest, opt, st, ct, password), ct), items.Count, source, Describe(items, dest));
         }
         else
         {
@@ -909,7 +912,7 @@ public partial class MainWindow : Window
             {
                 await FileOps.CopyAsync(items, dest, opt, st, ct);
                 if (move) await Task.Run(() => FileOps.Delete(items, recycle: false));
-            }, items.Count, source);
+            }, items.Count, source, Describe(items, dest));
         }
     }
 
@@ -975,7 +978,7 @@ public partial class MainWindow : Window
                 Directory.CreateDirectory(p.Target);
                 FileOps.Extract(p.Archive, p.Plan, p.Target, opt, st, ct, p.Password);
             }
-        }, ct), archives.Count, source);
+        }, ct), archives.Count, source, Describe(archives, dest));
     }
 
     private void Pack_Click(object sender, RoutedEventArgs e)
@@ -998,7 +1001,7 @@ public partial class MainWindow : Window
             return;
 
         var source = _active;
-        Enqueue(Loc.T("Balím"), false, (st, ct) => Task.Run(() => FileOps.Pack(items, path, request.Format, request.Level, request.Password, st, ct), ct), items.Count, source);
+        Enqueue(Loc.T("Balím"), false, (st, ct) => Task.Run(() => FileOps.Pack(items, path, request.Format, request.Level, request.Password, st, ct), ct), items.Count, source, Describe(items, path));
     }
 
     private void View_Click(object sender, RoutedEventArgs e) => OpenViewer(edit: false);
@@ -1038,20 +1041,58 @@ public partial class MainWindow : Window
             MessageBox.Show(Loc.T("{0} už existuje. Přepsat?", Path.GetFileName(destFile)), Loc.T("Potvrzení"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
         var first = sel[0].FullPath;
-        Enqueue(Loc.T("Spojuji"), false, (st, ct) => Task.Run(() => FileOps.Join(first, destFile, st, ct), ct), 1, _active);
+        Enqueue(Loc.T("Spojuji"), false, (st, ct) => Task.Run(() => FileOps.Join(first, destFile, st, ct), ct), 1, _active, Path.GetFileName(first) + " -> " + destFile);
     }
 
     // ---- fronta úloh: další F5/F6/Alt+F5/Alt+F9 při běžící operaci se zařadí a poběží postupně ----
 
-    private sealed record QueuedJob(string Verb, bool Verify, Func<CopyStats, CancellationToken, Task> Work, int Count, FilePanel FocusBack);
+    private sealed record QueuedJob(string Verb, string Detail, bool Verify, Func<CopyStats, CancellationToken, Task> Work, int Count, FilePanel FocusBack)
+    {
+        public string Key => Verb + "|" + Detail;
+    }
 
     private readonly Queue<QueuedJob> _queue = new();
+    private readonly HashSet<string> _jobKeys = new();   // čekající a běžící úlohy, proti dvojímu zařazení téhož
+    private readonly List<string> _jobErrors = new();
+    private QueuedJob? _currentJob;
     private bool _queueRunning;
+    private bool _held;   // úlohy zařazené přes Shift čekají na ruční spuštění (Ctrl+Enter)
 
-    private void Enqueue(string verb, bool verify, Func<CopyStats, CancellationToken, Task> work, int count, FilePanel focusBack)
+    /// <summary>Zobrazí chyby úloh (výchozí je okno se zprávou; v testech se nahrazuje).</summary>
+    private Action<string> _showJobErrors = null!;
+
+    private static string Describe(IReadOnlyList<FileItem> items, string target) =>
+        $"{items[0].Name}{(items.Count > 1 ? $" (+{items.Count - 1})" : "")} -> {target}";
+
+    private void Enqueue(string verb, bool verify, Func<CopyStats, CancellationToken, Task> work, int count, FilePanel focusBack, string detail = "")
     {
-        _queue.Enqueue(new QueuedJob(verb, verify, work, count, focusBack));
-        if (!_queueRunning) _ = ProcessQueue();
+        var job = new QueuedJob(verb, detail, verify, work, count, focusBack);
+        if (detail.Length > 0 && !_jobKeys.Add(job.Key))
+        {
+            StatusText.Text = Loc.T("Už je ve frontě: {0}", detail);
+            return;
+        }
+        _queue.Enqueue(job);
+        focusBack.CollapseSelection();   // výběr je zařazený, dá se hned vybírat další
+        UpdateQueueView();
+
+        // Shift+F5 / Shift+F6: jen zařadit a počkat; Ctrl+Enter nebo další běžné F5 frontu spustí.
+        if (Keyboard.Modifiers == ModifierKeys.Shift && !_queueRunning)
+        {
+            _held = true;
+            UpdateQueueView();
+            StatusText.Text = Loc.T("Zařazeno do fronty ({0}). Spustíš ji Ctrl+Enter.", _queue.Count);
+            return;
+        }
+        StartQueue();
+    }
+
+    /// <summary>Spustí frontu (Ctrl+Enter, položka Start queue, nebo běžné F5 po zařazení přes Shift).</summary>
+    private void StartQueue()
+    {
+        _held = false;
+        UpdateQueueView();
+        if (!_queueRunning && _queue.Count > 0) _ = ProcessQueue();
     }
 
     private async Task ProcessQueue()
@@ -1062,7 +1103,26 @@ public partial class MainWindow : Window
             while (_queue.Count > 0)
             {
                 var job = _queue.Dequeue();
-                await RunOperation(job.Verb, job.Verify, job.Work, job.Count, job.FocusBack);
+                _currentJob = job;
+                UpdateQueueView();
+                try
+                {
+                    await RunOperation(job.Verb, job.Verify, job.Work, job.Count, job.FocusBack);
+                }
+                finally
+                {
+                    _jobKeys.Remove(job.Key);
+                    _currentJob = null;
+                    UpdateQueueView();
+                }
+            }
+
+            // Chyba úlohy by jinak zmizela pod zprávou o další úloze, proto se po doběhnutí fronty ukážou všechny najednou.
+            if (_jobErrors.Count > 0)
+            {
+                var text = string.Join(Environment.NewLine, _jobErrors);
+                _jobErrors.Clear();
+                _showJobErrors(text);
             }
         }
         finally
@@ -1074,7 +1134,31 @@ public partial class MainWindow : Window
     private void ClearQueue()
     {
         _queue.Clear();
+        _jobKeys.Clear();
+        _held = false;
+        if (_currentJob is { Detail.Length: > 0 }) _jobKeys.Add(_currentJob.Key);
+        UpdateQueueView();
         StatusText.Text = Loc.T("Fronta vyprázdněna.");
+    }
+
+    /// <summary>Pruh nad stavovým řádkem: co běží a co čeká (viditelný, jen když něco čeká).</summary>
+    private void UpdateQueueView()
+    {
+        if (_queue.Count == 0)
+        {
+            QueueText.Visibility = Visibility.Collapsed;
+            QueueText.Text = "";
+            return;
+        }
+
+        var lines = new List<string>();
+        if (_held) lines.Add(Loc.T("Fronta čeká na spuštění (Ctrl+Enter)"));
+        if (_currentJob is not null) lines.Add("> " + _currentJob.Verb + ": " + _currentJob.Detail);
+        var number = 1;
+        foreach (var job in _queue.Take(4)) lines.Add($"{number++,2}. {job.Verb}: {job.Detail}");
+        if (_queue.Count > 4) lines.Add($"    ... +{_queue.Count - 4}");
+        QueueText.Text = string.Join(Environment.NewLine, lines);
+        QueueText.Visibility = Visibility.Visible;
     }
 
     /// <summary>Společný průběh: stav, rychlost, zbývající čas, Esc, závěrečné shrnutí.</summary>
@@ -1115,6 +1199,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             StatusText.Text = Loc.T("Chyba: ") + ex.Message;
+            _jobErrors.Add(verb + ": " + ex.Message);
         }
         finally
         {

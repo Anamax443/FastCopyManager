@@ -42,7 +42,8 @@ Příkazový řádek: cd .. / cd \ / cd cesta / D: mění složku aktivního pan
 Enter       Otevřít složku; na .zip .rar .7z .tar otevře archiv jako složku
 Backspace   O úroveň výš
 P / Esc     Během kopírování pozastavit / zrušit (Shift+Esc zruší i frontu)
-F5, F6, Alt+F5, Alt+F9 při běžící operaci zařadí další úlohu do fronty
+F5, F6, Alt+F5, Alt+F9 při běžící operaci zařadí další úlohu do fronty (viditelná nad stavovým řádkem)
+Shift+F5, Shift+F6   Jen zařadit do fronty a počkat; Ctrl+Enter frontu spustí
 Alt (podržet) Dolní lišta ukáže příkazy na Alt
 
 Esc zavře nápovědu.";
@@ -81,7 +82,8 @@ Down arrow on the last row   command line and bottom bar
 Enter       Open a folder; on .zip .rar .7z .tar opens the archive like a folder
 Backspace   Go up one level
 P / Esc     Pause / cancel while copying (Shift+Esc also clears the queue)
-F5, F6, Alt+F5, Alt+F9 while an operation runs add the next job to the queue
+F5, F6, Alt+F5, Alt+F9 while an operation runs add the next job to the queue (shown above the status line)
+Shift+F5, Shift+F6   Only add to the queue and wait; Ctrl+Enter starts the queue
 Alt (hold)  The bottom bar shows the Alt commands
 
 Esc closes this help.";

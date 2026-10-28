@@ -29,6 +29,8 @@
         <local:FilePanel x:Name="RightPanel" Grid.Row="1" Grid.Column="1" Margin="1,0,0,0"/>
 
         <DockPanel Grid.Row="2" Grid.ColumnSpan="2" Margin="4,0">
+            <TextBlock DockPanel.Dock="Top" x:Name="QueueText" Visibility="Collapsed" Foreground="#FFFFFF55"
+                       TextTrimming="CharacterEllipsis" Margin="2,2,2,2"/>
             <CheckBox DockPanel.Dock="Right" x:Name="VerifyBox" Content="Ověřit hashem" IsChecked="True"
                       Foreground="#FF55FFFF" VerticalAlignment="Center" Focusable="False"/>
             <TextBlock x:Name="StatusText" Padding="2" Text="Připraveno" TextTrimming="CharacterEllipsis"

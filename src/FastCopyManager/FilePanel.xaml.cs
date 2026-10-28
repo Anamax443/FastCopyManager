@@ -404,8 +404,38 @@ public partial class FilePanel : UserControl
 
     public void Refresh()
     {
+        // Výběr (i vícenásobný) se po obnovení zachová, aby ho nezrušilo dokončení kopírování běžícího na pozadí.
+        var selected = List.SelectedItems.OfType<FileItem>().Where(i => !i.IsParent)
+            .Select(i => i.FullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var cursor = ((Keyboard.FocusedElement as ListViewItem)?.DataContext as FileItem)?.FullPath
+                     ?? (List.SelectedItem as FileItem)?.FullPath;
+
         if (InArchive) ListArchive();
-        else if (CurrentPath.Length > 0) Navigate(CurrentPath, select: (List.SelectedItem as FileItem)?.FullPath);
+        else if (CurrentPath.Length > 0) Navigate(CurrentPath, select: cursor);
+
+        if (selected.Count > 1)
+        {
+            foreach (var item in List.Items.OfType<FileItem>().Where(i => selected.Contains(i.FullPath)))
+                if (!List.SelectedItems.Contains(item)) List.SelectedItems.Add(item);
+
+            // kurzor ukazuje na jiný řádek než výběr: ten se do výběru nepřidává
+            if (cursor is not null && !selected.Contains(cursor))
+            {
+                var extra = List.SelectedItems.OfType<FileItem>().FirstOrDefault(i => i.FullPath.Equals(cursor, StringComparison.OrdinalIgnoreCase));
+                if (extra is not null) List.SelectedItems.Remove(extra);
+            }
+        }
+    }
+
+    /// <summary>Po zařazení úlohy zůstane vybraná jen položka pod kurzorem, takže jde hned vybírat další.</summary>
+    public void CollapseSelection()
+    {
+        if (List.SelectedItems.Count <= 1) return;
+        var cursor = (Keyboard.FocusedElement as ListViewItem)?.DataContext as FileItem ?? List.SelectedItem as FileItem;
+        if (cursor is null) return;
+        List.SelectedItems.Clear();
+        List.SelectedItem = cursor;
+        FocusList();
     }
 
     // ---- archivy ----
