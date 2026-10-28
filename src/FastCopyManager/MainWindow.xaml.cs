@@ -1,126 +1,142 @@
-using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using Microsoft.Win32;
+using System.Windows.Input;
 
 namespace FastCopyManager;
 
 public partial class MainWindow : Window
 {
-    private static readonly string BaseDir = AppContext.BaseDirectory;
-    private static readonly string SettingsPath = Path.Combine(BaseDir, "settings.json");
-
-    private static readonly string[] ExeCandidates =
-    {
-        Path.Combine(BaseDir, "FastCopy", "FastCopy.exe"),
-        Path.Combine(BaseDir, "..", "FastCopy", "FastCopy.exe"),
-        @"C:\Program Files\FastCopy\FastCopy.exe",
-        @"C:\Program Files (x86)\FastCopy\FastCopy.exe",
-        @"C:\Program Files\FastCopy64\FastCopy.exe",
-    };
+    private FilePanel _active;
 
     public MainWindow()
     {
         InitializeComponent();
-        ExeBox.Text = ExeCandidates.Select(Path.GetFullPath).FirstOrDefault(File.Exists) ?? "";
-        LoadSettings();
-        Closing += (_, _) => SaveSettings();
+        _active = LeftPanel;
+        var start = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        LeftPanel.Navigate(start);
+        RightPanel.Navigate(start);
+        LeftPanel.GotKeyboardFocus += (_, _) => _active = LeftPanel;
+        RightPanel.GotKeyboardFocus += (_, _) => _active = RightPanel;
+        Loaded += (_, _) => LeftPanel.ListControl.Focus();
     }
 
-    private record Settings(string? Exe, string? Source, string? Target, int Mode, bool Verify);
+    private FilePanel Other => _active == LeftPanel ? RightPanel : LeftPanel;
 
-    private void LoadSettings()
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        try
+        switch (e.Key)
         {
-            var st = System.Text.Json.JsonSerializer.Deserialize<Settings>(File.ReadAllText(SettingsPath));
-            if (st is null) return;
-            if (!string.IsNullOrEmpty(st.Exe) && File.Exists(st.Exe)) ExeBox.Text = st.Exe;
-            SourceBox.Text = st.Source ?? "";
-            TargetBox.Text = st.Target ?? "";
-            ModeBox.SelectedIndex = Math.Clamp(st.Mode, 0, ModeBox.Items.Count - 1);
-            VerifyBox.IsChecked = st.Verify;
+            case Key.Tab: Switch_Click(this, e); break;
+            case Key.F5: Copy_Click(this, e); break;
+            case Key.F6: Move_Click(this, e); break;
+            case Key.F7: MkDir_Click(this, e); break;
+            case Key.F8 or Key.Delete: Delete_Click(this, e); break;
+            case Key.F10: Close(); break;
+            default: return;
         }
-        catch { /* první spuštění nebo poškozený soubor */ }
+        e.Handled = true;
     }
 
-    private void SaveSettings()
+    private void Switch_Click(object sender, RoutedEventArgs e) => Other.ListControl.Focus();
+    private void Exit_Click(object sender, RoutedEventArgs e) => Close();
+    private async void Copy_Click(object sender, RoutedEventArgs e) => await Transfer(move: false);
+    private async void Move_Click(object sender, RoutedEventArgs e) => await Transfer(move: true);
+
+    private async Task Transfer(bool move)
     {
-        try
+        var items = _active.Selected;
+        if (items.Count == 0) return;
+        var dest = Other.CurrentPath;
+        if (dest.Equals(_active.CurrentPath, StringComparison.OrdinalIgnoreCase))
         {
-            var st = new Settings(ExeBox.Text, SourceBox.Text, TargetBox.Text, ModeBox.SelectedIndex, VerifyBox.IsChecked == true);
-            File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(st));
-        }
-        catch { /* flashka jen pro čtení, nic se neukládá */ }
-    }
-
-    private void BrowseExe_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new OpenFileDialog { Filter = "FastCopy.exe|FastCopy.exe|Programy|*.exe" };
-        if (dlg.ShowDialog() == true) ExeBox.Text = dlg.FileName;
-    }
-
-    private void BrowseSource_Click(object sender, RoutedEventArgs e) => Pick(SourceBox);
-    private void BrowseTarget_Click(object sender, RoutedEventArgs e) => Pick(TargetBox);
-
-    private static void Pick(TextBox box)
-    {
-        var dlg = new OpenFolderDialog();
-        if (dlg.ShowDialog() == true) box.Text = dlg.FolderName;
-    }
-
-    private async void Start_Click(object sender, RoutedEventArgs e)
-    {
-        var exe = ExeBox.Text.Trim();
-        var source = SourceBox.Text.Trim();
-        var target = TargetBox.Text.Trim();
-
-        if (!File.Exists(exe)) { Warn("Zadej platnou cestu k FastCopy.exe."); return; }
-        if (!Directory.Exists(source)) { Warn("Zdrojová složka neexistuje."); return; }
-        if (target.Length == 0) { Warn("Zadej cílovou složku."); return; }
-
-        var mode = (string)((ComboBoxItem)ModeBox.SelectedItem).Tag;
-        if (mode is "Sync" or "Move" &&
-            MessageBox.Show($"Režim {mode} může mazat soubory. Pokračovat?", "Potvrzení",
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            StatusText.Text = "Zdroj a cíl jsou stejná složka.";
             return;
+        }
 
-        var psi = new ProcessStartInfo(exe) { UseShellExecute = false };
-        psi.ArgumentList.Add($"/cmd={mode}");
-        if (VerifyBox.IsChecked == true) psi.ArgumentList.Add("/verify");
-        psi.ArgumentList.Add("/auto_close");
-        psi.ArgumentList.Add("/log");
-        psi.ArgumentList.Add("/to=" + target.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar);
-        psi.ArgumentList.Add(source);
+        var overwrite = false;
+        if (FileOps.Conflicts(items, dest))
+        {
+            var r = MessageBox.Show("Některé položky v cíli už existují. Přepsat?\nAno = přepsat, Ne = přeskočit.",
+                "Konflikt", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (r == MessageBoxResult.Cancel) return;
+            overwrite = r == MessageBoxResult.Yes;
+        }
 
-        Append($"> {Path.GetFileName(exe)} {string.Join(' ', psi.ArgumentList)}");
-        StartButton.IsEnabled = false;
-        StatusText.Text = "Probíhá…";
+        var verb = move ? "Přesouvám" : "Kopíruji";
+        var source = _active;
+        IsEnabled = false;
         try
         {
-            using var proc = Process.Start(psi)!;
-            await proc.WaitForExitAsync();
-            Append($"Hotovo, kód ukončení {proc.ExitCode}.");
-            StatusText.Text = proc.ExitCode == 0 ? "Hotovo" : $"Chyba ({proc.ExitCode})";
+            await Task.Run(() =>
+            {
+                FileOps.Copy(items, dest, overwrite, f => Dispatcher.Invoke(() => StatusText.Text = $"{verb}: {f}"), CancellationToken.None);
+                if (move) FileOps.Delete(items, recycle: false);
+            });
+            StatusText.Text = $"Hotovo ({items.Count} položek).";
         }
         catch (Exception ex)
         {
-            Append("Chyba: " + ex.Message);
-            StatusText.Text = "Chyba";
+            StatusText.Text = "Chyba: " + ex.Message;
         }
         finally
         {
-            StartButton.IsEnabled = true;
+            IsEnabled = true;
+            LeftPanel.Refresh();
+            RightPanel.Refresh();
+            source.ListControl.Focus();
         }
     }
 
-    private void Append(string line)
+    private void MkDir_Click(object sender, RoutedEventArgs e)
     {
-        LogBox.AppendText(line + Environment.NewLine);
-        LogBox.ScrollToEnd();
+        var name = Prompt("Nová složka", "Název složky:");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(_active.CurrentPath, name.Trim()));
+            _active.Refresh();
+        }
+        catch (Exception ex) { StatusText.Text = "Chyba: " + ex.Message; }
     }
 
-    private static void Warn(string msg) =>
-        MessageBox.Show(msg, "FastCopyManager", MessageBoxButton.OK, MessageBoxImage.Information);
+    private void Delete_Click(object sender, RoutedEventArgs e)
+    {
+        var items = _active.Selected;
+        if (items.Count == 0) return;
+        var recycle = FileOps.HasRecycleBin(_active.CurrentPath);
+        var what = items.Count == 1 ? items[0].Name : $"{items.Count} položek";
+        var where = recycle ? "do koše" : "NATRVALO (tento disk nemá koš)";
+        if (MessageBox.Show($"Smazat {what} {where}?", "Potvrzení", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        try
+        {
+            FileOps.Delete(items, recycle);
+            StatusText.Text = "Smazáno.";
+        }
+        catch (Exception ex) { StatusText.Text = "Chyba: " + ex.Message; }
+        _active.Refresh();
+    }
+
+    private string? Prompt(string title, string label)
+    {
+        var box = new TextBox { Margin = new Thickness(0, 6, 0, 12) };
+        var ok = new Button { Content = "OK", Width = 80, IsDefault = true };
+        var cancel = new Button { Content = "Zrušit", Width = 80, IsCancel = true, Margin = new Thickness(8, 0, 0, 0) };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+        var panel = new StackPanel { Margin = new Thickness(16) };
+        panel.Children.Add(new TextBlock { Text = label });
+        panel.Children.Add(box);
+        panel.Children.Add(buttons);
+        var win = new Window
+        {
+            Title = title, Content = panel, Width = 360, SizeToContent = SizeToContent.Height,
+            Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize,
+        };
+        ok.Click += (_, _) => win.DialogResult = true;
+        win.Loaded += (_, _) => box.Focus();
+        return win.ShowDialog() == true ? box.Text : null;
+    }
 }
