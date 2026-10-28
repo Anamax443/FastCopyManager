@@ -12,6 +12,13 @@ public static class AppPaths
     public static string ExeDirectory { get; } =
         Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
 
-    /// <summary>Podsložka pro nastavení, aby vedle exe nic dalšího neleželo.</summary>
-    public static string DataDirectory => Path.Combine(ExeDirectory, "Data");
+    /// <summary>
+    /// Kam se ukládá nastavení. Výchozí je profil uživatele na daném počítači (%LOCALAPPDATA%\FastCopyManager),
+    /// takže vedle exe nic nevznikne. Kdo chce nastavení nosit s sebou, vytvoří vedle exe složku Data:
+    /// pokud existuje, použije se ona (přenosný režim).
+    /// </summary>
+    public static string SettingsDirectory { get; } =
+        Directory.Exists(Path.Combine(ExeDirectory, "Data"))
+            ? Path.Combine(ExeDirectory, "Data")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FastCopyManager");
 }

@@ -22,7 +22,8 @@ Alt+F5      Zabalit vybrané (dialog: ZIP / 7z / RAR / TAR.GZ / TAR, komprese, h
             7z zapisuje zabudovaný 7za.exe; RAR jen když je k dispozici WinRAR (Rar.exe)
 Alt+F9      Rozbalit vybraný archiv (zip, rar, 7z, tar) do druhého panelu
 Alt+F6      Spojit rozdělený soubor (.001, .002 ...)
-Alt+F1/F2   Změnit disk v levém / pravém panelu
+Alt+F1/F2   Změnit disk nebo zadat síťovou cestu (\\server\sdileni) v levém / pravém panelu
+Ctrl+G      Zadat cestu (i síťovou); totéž klik na cestu nad panelem; Enter přejde, Esc zruší
 
 Ctrl+F1/F2  Plný výpis / více sloupců (levý / pravý panel)
 Ctrl+F3     Řadit podle názvu        Ctrl+F4  podle přípony
@@ -35,6 +36,7 @@ Ctrl+L      Jazyk CS / EN
 
 Tab         Druhý panel (také šipky vlevo / vpravo)
 Alt (klepnout) nebo Alt+Nahoru   Horní menu odkudkoli (znovu Alt = zpět)
+Příkazový řádek: cd .. / cd \ / cd cesta / D: mění složku aktivního panelu, ostatní příkazy se spustí v cmd.exe
 Šipka nahoru z prvního řádku   horní menu (Enter rozbalí, šipka dolů zpět do panelu)
 Šipka dolů z posledního řádku  příkazový řádek a dolní lišta
 Enter       Otevřít složku; na .zip .rar .7z .tar otevře archiv jako složku
@@ -59,7 +61,8 @@ Alt+F5      Pack selected items (dialog: ZIP / 7z / RAR / TAR.GZ / TAR, compress
             7z is written by the built-in 7za.exe; RAR only when WinRAR (Rar.exe) is available
 Alt+F9      Unpack the selected archive (zip, rar, 7z, tar) into the other panel
 Alt+F6      Join a split file (.001, .002 ...)
-Alt+F1/F2   Change drive in the left / right panel
+Alt+F1/F2   Change drive or enter a network path (\\server\share) in the left / right panel
+Ctrl+G      Enter a path (network too); same as clicking the path above the panel; Enter goes, Esc cancels
 
 Ctrl+F1/F2  Full list / multi-column list (left / right panel)
 Ctrl+F3     Sort by name             Ctrl+F4  by extension
@@ -72,6 +75,7 @@ Ctrl+L      Language CS / EN
 
 Tab         Other panel (also Left / Right arrows)
 Alt (tap) or Alt+Up   Top menu from anywhere (Alt again = back)
+Command line: cd .. / cd \ / cd path / D: changes the active panel folder, other commands run in cmd.exe
 Up arrow on the first row    top menu (Enter opens it, Down returns to the panel)
 Down arrow on the last row   command line and bottom bar
 Enter       Open a folder; on .zip .rar .7z .tar opens the archive like a folder

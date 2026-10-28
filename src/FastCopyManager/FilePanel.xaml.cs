@@ -23,6 +23,93 @@ public partial class FilePanel : UserControl
 
     public event EventHandler? PathChanged;
 
+    /// <summary>Zpráva pro stavový řádek (například že zadaná cesta neexistuje).</summary>
+    public event Action<string>? StatusMessage;
+
+    // ---- cesta nad panelem: klik (nebo Ctrl+G) ji změní na editovatelné pole, jde zadat i síťovou cestu \\server\sdileni ----
+
+    public bool IsEditingPath => PathEdit.Visibility == Visibility.Visible;
+
+    public void BeginPathEdit()
+    {
+        if (QuickView) return;
+        PathEdit.Text = CurrentPath;
+        PathText.Visibility = Visibility.Collapsed;
+        PathEdit.Visibility = Visibility.Visible;
+        PathEdit.Focus();
+        PathEdit.SelectAll();
+    }
+
+    private void EndPathEdit(bool refocusList)
+    {
+        PathEdit.Visibility = Visibility.Collapsed;
+        PathText.Visibility = Visibility.Visible;
+        if (refocusList) FocusList();
+    }
+
+    private void PathText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        BeginPathEdit();
+        e.Handled = true;
+    }
+
+    private async void PathEdit_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            EndPathEdit(true);
+        }
+        else if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            var text = PathEdit.Text;
+            EndPathEdit(true);
+            var error = await GoToAsync(text);
+            if (error is not null) StatusMessage?.Invoke(error);
+            FocusList();
+        }
+    }
+
+    private void PathEdit_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (IsEditingPath) EndPathEdit(false);   // klik jinam = zrušit úpravu
+    }
+
+    /// <summary>
+    /// Přejde na zadanou cestu: absolutní, relativní k aktuální složce, "..", "\", disk (D:) i síťová (\\server\sdileni).
+    /// Vrací chybovou zprávu, nebo null při úspěchu. Kontrola existence má časový limit, aby nedostupný server nezablokoval okno.
+    /// </summary>
+    public async Task<string?> GoToAsync(string argument)
+    {
+        argument = Environment.ExpandEnvironmentVariables((argument ?? "").Trim().Trim((char)34));
+        if (argument.Length == 0) return null;
+        if (argument == ".." && InArchive)
+        {
+            GoUp();
+            return null;
+        }
+        if (System.Text.RegularExpressions.Regex.IsMatch(argument, @"^[A-Za-z]:$")) argument += (char)92;
+
+        string target;
+        try
+        {
+            target = Path.GetFullPath(Path.Combine(CurrentPath, argument));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return Loc.T("Cesta nenalezena: {0}", argument);
+        }
+
+        var exists = Task.Run(() => Directory.Exists(target));
+        if (await Task.WhenAny(exists, Task.Delay(8000)) != exists)
+            return Loc.T("Cesta nedostupná (vypršel čas): {0}", target);
+        if (!await exists) return Loc.T("Cesta nenalezena: {0}", target);
+
+        Navigate(target);
+        return null;
+    }
+
     /// <summary>Změna vybrané položky (druhý panel podle ní aktualizuje náhled).</summary>
     public event EventHandler? SelectionChangedOut;
 
@@ -402,7 +489,7 @@ public partial class FilePanel : UserControl
         return plan;
     }
 
-    private void GoUp()
+    public void GoUp()
     {
         if (InArchive)
         {

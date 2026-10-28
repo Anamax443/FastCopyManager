@@ -87,7 +87,11 @@
         <DockPanel>
             <TextBlock DockPanel.Dock="Top" x:Name="PathText" Padding="4,1" HorizontalAlignment="Center"
                        Foreground="{StaticResource NcBlue}" Background="{StaticResource NcCyan}"
-                       TextTrimming="CharacterEllipsis"/>
+                       TextTrimming="CharacterEllipsis" Cursor="Hand" MouseLeftButtonDown="PathText_MouseLeftButtonDown"/>
+            <TextBox DockPanel.Dock="Top" x:Name="PathEdit" Visibility="Collapsed" Padding="4,1"
+                     Foreground="{StaticResource NcBlue}" Background="{StaticResource NcCyan}"
+                     CaretBrush="{StaticResource NcBlue}" SelectionBrush="{StaticResource NcBlue}" BorderThickness="0"
+                     KeyDown="PathEdit_KeyDown" LostKeyboardFocus="PathEdit_LostKeyboardFocus"/>
             <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource NcCyan}" BorderThickness="0,2,0,0">
                 <TextBlock x:Name="InfoText" Padding="4,1"
                            Foreground="{StaticResource NcText}" TextTrimming="CharacterEllipsis"/>

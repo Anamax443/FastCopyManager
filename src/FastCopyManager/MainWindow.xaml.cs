@@ -28,6 +28,8 @@ public partial class MainWindow : Window
         RightPanel.GotKeyboardFocus += (_, _) => { _active = RightPanel; UpdatePrompt(); SetZone(Zone.Panels); };
         LeftPanel.PathChanged += (_, _) => UpdatePrompt();
         RightPanel.PathChanged += (_, _) => UpdatePrompt();
+        LeftPanel.StatusMessage += message => StatusText.Text = message;
+        RightPanel.StatusMessage += message => StatusText.Text = message;
         LeftPanel.SelectionChangedOut += (_, _) => UpdatePreview();
         RightPanel.SelectionChangedOut += (_, _) => UpdatePreview();
         LeftPanel.NavigateOut += d => OnPanelNavigateOut(LeftPanel, d);
@@ -455,11 +457,49 @@ public partial class MainWindow : Window
         HighlightFKeys(_fkIndex);
     }
 
+    /// <summary>
+    /// Příkazy, které Norton Commander zpracuje sám v aktivním panelu: cd, chdir (včetně "cd.." a "cd \"),
+    /// cd s cestou i přepnutí disku zadáním písmene s dvojtečkou (D:). Vrací true, když šlo o takový příkaz.
+    /// </summary>
+    private bool TryBuiltinCommand(string text)
+    {
+        var backslash = ((char)92).ToString();
+        string argument;
+        var drive = System.Text.RegularExpressions.Regex.Match(text, @"^([A-Za-z]):$");
+        var cd = System.Text.RegularExpressions.Regex.Match(text, @"^(?:cd|chdir)(?=[\s.\\/]|$)(?:\s+/d\b)?\s*(.*)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (drive.Success) argument = drive.Groups[1].Value + ":" + backslash;
+        else if (cd.Success) argument = cd.Groups[1].Value.Trim().Trim((char)34);
+        else return false;
+
+        var panel = _active;
+        if (argument.Length == 0)
+        {
+            StatusText.Text = panel.CurrentPath;   // "cd" bez argumentu vypíše aktuální cestu
+            return true;
+        }
+
+        _ = GoToAndReport(panel, argument);
+        return true;
+    }
+
+    private async Task GoToAndReport(FilePanel panel, string argument)
+    {
+        var error = await panel.GoToAsync(argument);
+        if (error is not null) StatusText.Text = error;
+    }
+
     /// <summary>Příkazový řádek: spustí příkaz v cmd.exe v aktuální složce a nechá okno otevřené (pause).</summary>
     private void RunCommand()
     {
         var text = CommandBox.Text.Trim();
         if (text.Length == 0) { FocusPanels(); return; }
+        if (TryBuiltinCommand(text))
+        {
+            CommandBox.Clear();
+            FocusPanels();
+            return;
+        }
         try
         {
             var quote = ((char)34).ToString();
@@ -483,7 +523,7 @@ public partial class MainWindow : Window
     /// <summary>Psaní v panelu se přesměruje do příkazového řádku, jako v Norton Commanderu.</summary>
     private void Window_PreviewTextInput(object sender, TextCompositionEventArgs e)
     {
-        if (MenuPopup.IsOpen || _zone != Zone.Panels || e.Text.Length != 1) return;
+        if (MenuPopup.IsOpen || _zone != Zone.Panels || e.Text.Length != 1 || LeftPanel.IsEditingPath || RightPanel.IsEditingPath) return;
         var c = e.Text[0];
         if (!(char.IsLetterOrDigit(c) || c == (char)92 || "._-:~/$%&()+=,;@!#".IndexOf(c) >= 0)) return;
         CommandBox.Focus();
@@ -546,7 +586,7 @@ public partial class MainWindow : Window
 
     private sealed record Settings(string? Left, string? Right, bool Verify, bool LeftBrief = false, bool RightBrief = false, string? Lang = null, string? LeftSort = null, string? RightSort = null);
 
-    private static readonly string SettingsPath = Path.Combine(AppPaths.DataDirectory, "settings.json");
+    private static readonly string SettingsPath = Path.Combine(AppPaths.SettingsDirectory, "settings.json");
     private static readonly string LegacySettingsPath = Path.Combine(AppPaths.ExeDirectory, "settings.json");
     private static readonly string AppRoot = Path.GetPathRoot(AppPaths.ExeDirectory) ?? "";
     private const string AppDrive = "<app>:";
@@ -594,7 +634,7 @@ public partial class MainWindow : Window
         try
         {
             var st = new Settings(ToPortable(LeftPanel.CurrentPath), ToPortable(RightPanel.CurrentPath), VerifyBox.IsChecked == true, LeftPanel.Brief, RightPanel.Brief, Loc.Code, LeftPanel.SortSpec, RightPanel.SortSpec);
-            Directory.CreateDirectory(AppPaths.DataDirectory);
+            Directory.CreateDirectory(AppPaths.SettingsDirectory);
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(st));
         }
         catch { /* flashka jen pro čtení, nic se neukládá */ }
@@ -679,12 +719,12 @@ public partial class MainWindow : Window
 
     private void ChangeDrive(FilePanel panel)
     {
-        var drives = string.Join(", ", DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => d.Name.TrimEnd('\\')));
-        var letter = Prompt(Loc.T("Disk"), Loc.T("Písmeno disku ({0}):", drives));
-        if (string.IsNullOrWhiteSpace(letter)) return;
-        var path = letter.Trim().TrimEnd(':', '\\')[..1].ToUpperInvariant() + ":\\";
-        if (Directory.Exists(path)) panel.Navigate(path);
-        else StatusText.Text = Loc.T("Disk {0} není dostupný.", path);
+        var drives = string.Join(", ", DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => d.Name.TrimEnd((char)92)));
+        var input = Prompt(Loc.T("Disk"), Loc.T("Písmeno disku ({0}) nebo síťová cesta:", drives));
+        if (string.IsNullOrWhiteSpace(input)) return;
+        input = input.Trim();
+        var isPath = input.Length > 2 || input.Contains((char)92) || input.Contains('/');
+        _ = GoToAndReport(panel, isPath ? input : char.ToUpperInvariant(input[0]) + ":");
     }
 
     private FilePanel Other => _active == LeftPanel ? RightPanel : LeftPanel;
@@ -695,6 +735,7 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (LeftPanel.IsEditingPath || RightPanel.IsEditingPath) return;   // píše se cesta, klávesy patří poli
         if (e.Key == Key.System && e.SystemKey is Key.LeftAlt or Key.RightAlt) AltPressed(e.IsRepeat);
         else _altAlone = false;
         if (MenuPopup.IsOpen)
@@ -728,9 +769,10 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R or Key.L or Key.Q)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.U or Key.R or Key.L or Key.Q or Key.G)
         {
-            if (e.Key == Key.Q) ToggleQuickView(Other);
+            if (e.Key == Key.G) _active.BeginPathEdit();
+            else if (e.Key == Key.Q) ToggleQuickView(Other);
             else if (e.Key == Key.L) ToggleLanguage();
             else if (e.Key == Key.U) SwapPanels();
             else { LeftPanel.Refresh(); RightPanel.Refresh(); }

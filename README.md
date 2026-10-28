@@ -20,7 +20,8 @@ Dvoupanelový správce souborů pro Windows (WPF, .NET 10) ve stylu Norton Comma
 | F8 / Delete | smazat (do koše; na flashce natrvalo, s upozorněním) |
 | F9 | menu nahoře (šipky, Enter, Esc) |
 | F10 | konec |
-| Alt+F1 / Alt+F2 | změnit disk v levém / pravém panelu |
+| Alt+F1 / Alt+F2 | změnit disk nebo zadat síťovou cestu v levém / pravém panelu |
+| Ctrl+G nebo klik na cestu | zadat cestu nad panelem, i síťovou (`\\server\sdileni`); Enter přejde, Esc zruší |
 | Ctrl+F1 / Ctrl+F2 | přepnout levý / pravý panel mezi plným výpisem a více sloupci (Brief) |
 | Ctrl+Q | náhled souboru (txt, md, log, kód ...) ve druhém panelu; Tab nebo šipka ho zavře |
 | Ctrl+U / Ctrl+R | prohodit panely / znovu načíst |
@@ -41,7 +42,7 @@ dotnet build -c Release
 
 - Výsledkem je **jediný soubor `FastCopyManager.exe`**: .NET, knihovny, písmo i 7za.exe jsou uvnitř. Na flashku stačí zkopírovat ten jeden soubor, na cílovém počítači se nic neinstaluje.
 - Při spuštění se nativní části WPF (cca 8 MB) rozbalí do `%TEMP%\.net\FastCopyManager` a 7za.exe (až při prvním použití 7z) do `%TEMP%\FastCopyManager\7-Zip`. Jinde se na počítači nic nezapisuje. První start trvá o chvíli déle (kolem 1-3 s), další jsou rychlé.
-- Nastavení se ukládá do podsložky `Data` vedle exe (`Data\settings.json`), takže v kořeni flashky zůstane jen exe a tahle složka. Na flashce jen pro čtení se nastavení prostě neuloží.
+- Vedle exe se nevytváří nic: nastavení se ukládá do profilu uživatele na daném počítači (`%LOCALAPPDATA%\FastCopyManager\settings.json`). Kdo chce nastavení nosit s sebou na flashce, vytvoří vedle exe prázdnou složku `Data`; pokud existuje, použije se ona (přenosný režim).
 - Exe je nepodepsané a velké, takže ho některé antiviry nebo firemní zásady mohou zablokovat. Z FAT/exFAT flashky se obvykle spouští bez značky „staženo z internetu“, takže SmartScreen většinou mlčí. Volitelný self-signed podpis (`-Sign`) je důvěryhodný jen na stroji, kde vznikl.
 
 ## Písmo a licence
@@ -62,7 +63,7 @@ Při kopírování souboru nad 4 GB na FAT32 se aplikace zeptá, jestli ho rozd�
 
 ## Nastavení
 
-Poslední složky obou panelů, režim Brief a přepínač ověření se ukládají do `settings.json` vedle exe. Cesty na stejném disku, odkud aplikace běží, se ukládají relativně, takže po změně písmene flashky platí dál. Na flashce jen pro čtení se nastavení prostě neuloží.
+Poslední složky obou panelů, režim Brief, řazení, jazyk a přepínač ověření se ukládají do `%LOCALAPPDATA%\FastCopyManager\settings.json`, nebo do `Data\settings.json` vedle exe, když tam složka `Data` existuje (přenosný režim, nastavení putuje s flashkou). Cesty na stejném disku, odkud aplikace běží, se ukládají relativně, takže po změně písmene flashky platí dál. Když se do cílové složky nedá zapisovat, nastavení se prostě neuloží.
 
 ## Jazyk (CS / EN)
 
