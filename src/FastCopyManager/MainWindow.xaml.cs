@@ -443,7 +443,7 @@ public partial class MainWindow : Window
             ("6", "RenMov", () => Move_Click(this, new RoutedEventArgs())),
             ("7", "Mkdir", () => MkDir_Click(this, new RoutedEventArgs())),
             ("8", "Delete", () => Delete_Click(this, new RoutedEventArgs())),
-            ("9", "", null),
+            ("9", "PullDn", () => OpenMenu(0)),
             ("10", "Quit", Close),
         };
         foreach (var (num, label, act) in keys)
