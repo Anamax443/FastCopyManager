@@ -618,6 +618,9 @@ public static class FileOps
             case PackFormat.Zip:
                 PackZip(items, path, stats, ct, level);
                 break;
+            case PackFormat.SevenZip or PackFormat.Rar:
+                PackExternal(items, path, format, level, password, stats, ct);
+                break;
             default:
                 PackTar(items, path, format == PackFormat.TarGz, level, stats, ct);
                 break;
@@ -698,6 +701,95 @@ public static class FileOps
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>
+    /// 7z a RAR zapisuje externí nástroj (7-Zip, WinRAR): formát RAR smí vytvářet jen WinRAR.
+    /// Postup z 7z se čte z jeho výpisu, zrušení nástroj ukončí a dočasný soubor smaže.
+    /// </summary>
+    private static void PackExternal(IReadOnlyList<FileItem> items, string path, PackFormat format, CompressionLevel level, string? password, CopyStats stats, CancellationToken ct)
+    {
+        var sevenZip = format == PackFormat.SevenZip;
+        var tool = sevenZip ? ExternalTools.Find7z() : ExternalTools.FindRar();
+        if (tool is null)
+            throw new IOException(sevenZip
+                ? Loc.T("Nenalezen 7-Zip (7z.exe). Nainstaluj 7-Zip nebo dej 7z.exe a 7z.dll do složky Tools vedle aplikace.")
+                : Loc.T("RAR umí vytvářet jen WinRAR (Rar.exe, placený se zkušební dobou). Nainstaluj WinRAR nebo dej Rar.exe do složky Tools vedle aplikace."));
+
+        var total = Math.Max(CollectFiles(items).Sum(f => f.Size), 1);
+        stats.AddTotal(total);
+        var tmp = path + ".fcm.tmp";
+        TryDelete(tmp);   // nástroje by jinak přidávaly do existujícího archivu
+
+        var psi = new System.Diagnostics.ProcessStartInfo(tool)
+        {
+            WorkingDirectory = Path.GetDirectoryName(items[0].FullPath)!,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        if (sevenZip)
+        {
+            var mx = level switch { CompressionLevel.NoCompression => 0, CompressionLevel.Fastest => 1, CompressionLevel.SmallestSize => 9, _ => 5 };
+            foreach (var a in new[] { "a", "-t7z", "-y", "-bsp1", "-bb0", "-mx=" + mx }) psi.ArgumentList.Add(a);
+            if (password is not null) { psi.ArgumentList.Add("-p" + password); psi.ArgumentList.Add("-mhe=on"); }
+        }
+        else
+        {
+            var m = level switch { CompressionLevel.NoCompression => 0, CompressionLevel.Fastest => 1, CompressionLevel.SmallestSize => 5, _ => 3 };
+            foreach (var a in new[] { "a", "-r", "-y", "-idq", "-ma5", "-m" + m }) psi.ArgumentList.Add(a);
+            if (password is not null) psi.ArgumentList.Add("-hp" + password);
+        }
+        psi.ArgumentList.Add(tmp);
+        psi.ArgumentList.Add("--");
+        foreach (var item in items) psi.ArgumentList.Add(item.Name);
+
+        var output = new System.Text.StringBuilder();
+        using var process = new System.Diagnostics.Process { StartInfo = psi };
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+            lock (output) output.AppendLine(e.Data);
+            if (!sevenZip) return;
+            var match = System.Text.RegularExpressions.Regex.Match(e.Data, @"(\d{1,3})%");
+            if (!match.Success) return;
+            var delta = total * Math.Min(100, int.Parse(match.Groups[1].Value)) / 100 - stats.Done;
+            if (delta > 0) stats.AddDone(delta);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+            lock (output) output.AppendLine(e.Data);
+        };
+
+        try
+        {
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            using var registration = ct.Register(() =>
+            {
+                try { process.Kill(true); } catch { /* proces už skončil */ }
+            });
+            stats.Current = items[0].FullPath;
+            process.WaitForExit();
+            ct.ThrowIfCancellationRequested();
+            if (process.ExitCode > 1)   // 0 = OK, 1 = varování (např. soubor používá jiný program)
+            {
+                string tail;
+                lock (output) tail = string.Join(" ", output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).TakeLast(3));
+                throw new IOException(Loc.T("Chyba nástroje {0}: {1}", Path.GetFileName(tool), tail));
+            }
+            var rest = total - stats.Done;
+            if (rest > 0) stats.AddDone(rest);
+            File.Move(tmp, path, true);
+        }
+        catch
+        {
+            TryDelete(tmp);
+            throw;
         }
     }
 

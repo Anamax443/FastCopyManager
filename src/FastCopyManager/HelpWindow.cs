@@ -18,7 +18,8 @@ F8, Delete  Smazat
 F9          Menu nahoře
 F10         Konec
 
-Alt+F5      Zabalit vybrané (dialog: ZIP / TAR.GZ / TAR, komprese, heslo AES-256)
+Alt+F5      Zabalit vybrané (dialog: ZIP / 7z / RAR / TAR.GZ / TAR, komprese, heslo)
+            7z zapisuje přibalený 7za.exe (složka Tools); RAR jen když je k dispozici WinRAR (Rar.exe)
 Alt+F9      Rozbalit vybraný archiv (zip, rar, 7z, tar) do druhého panelu
 Alt+F6      Spojit rozdělený soubor (.001, .002 ...)
 Alt+F1/F2   Změnit disk v levém / pravém panelu
@@ -54,7 +55,8 @@ F8, Delete  Delete
 F9          Top menu
 F10         Quit
 
-Alt+F5      Pack selected items (dialog: ZIP / TAR.GZ / TAR, compression, AES-256 password)
+Alt+F5      Pack selected items (dialog: ZIP / 7z / RAR / TAR.GZ / TAR, compression, password)
+            7z is written by the bundled 7za.exe (Tools folder); RAR only when WinRAR (Rar.exe) is available
 Alt+F9      Unpack the selected archive (zip, rar, 7z, tar) into the other panel
 Alt+F6      Join a split file (.001, .002 ...)
 Alt+F1/F2   Change drive in the left / right panel

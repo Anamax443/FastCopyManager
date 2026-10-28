@@ -6,6 +6,14 @@ $out  = Join-Path $root 'publish'
 
 dotnet publish "$root\src\FastCopyManager\FastCopyManager.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o $out
 
+# 7-Zip (7za.exe) pro vytváření 7z přímo z flashky, bez instalace; licence musí být přiložena.
+$tools = Join-Path $out 'Tools'
+New-Item -ItemType Directory -Force $tools | Out-Null
+$vendor = Join-Path $root 'third_party\7-Zip'
+Copy-Item "$vendor\7za.exe" $tools -Force
+Copy-Item "$vendor\License.txt" (Join-Path $tools '7-Zip-License.txt') -Force
+Copy-Item "$vendor\SOURCE.txt" (Join-Path $tools '7-Zip-SOURCE.txt') -Force
+
 $subject = 'CN=FastCopyManager (AXIMA)'
 $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object Subject -eq $subject | Select-Object -First 1
 if (-not $cert) {

@@ -76,3 +76,17 @@ Alt+F5 otevře dialog: název, formát (ZIP, TAR.GZ nebo TAR), komprese (bez, ry
 ## Fronta
 
 Když běží kopírování a dáš další F5, F6, Alt+F5 nebo Alt+F9, nová úloha se zařadí do fronty a poběží po dokončení předchozí. Počet čekajících úloh je vidět ve stavovém řádku. Esc zruší běžící úlohu, Shift+Esc zruší i frontu, P pozastaví. Za běhu se dá dál procházet panely; mazání a vytváření složek je po dobu operace zakázané.
+
+### 7z a RAR při balení
+
+ZIP (včetně hesla AES-256), TAR a TAR.GZ zapisuje aplikace sama. **7z** zapisuje přibalený **7za.exe** (7-Zip Extra) ve složce `Tools` vedle aplikace, takže funguje z flashky na jakémkoli počítači, bez instalace. **RAR** je uzavřený formát, který smí vytvářet jen WinRAR (`Rar.exe`, placený se zkušební dobou); ten aplikace nepřibaluje.
+
+- 7z: použije se `Tools\7za.exe`, případně nainstalovaný 7-Zip (Program Files, PATH).
+- RAR: jen když je k dispozici `Rar.exe` (složka `Tools` vedle aplikace, WinRAR v Program Files nebo v PATH). Jinak dialog napíše, co chybí. Na cizím počítači bez WinRARu RAR vytvořit nelze; použij 7z nebo ZIP.
+- Rozbalování a prohlížení ZIP, RAR, 7z, TAR a TAR.GZ funguje vždy, bez externího nástroje.
+- U 7z a RAR se heslo předává nástroji na příkazové řádce, takže je po dobu balení viditelné ostatním procesům téhož uživatele.
+
+### Použitý software třetích stran
+
+- **7-Zip Extra 26.05** (`7za.exe`), Copyright (C) 1999-2026 Igor Pavlov, licence GNU LGPL, zdrojový kód a informace: https://www.7-zip.org/. Binárka je nezměněná, licenční text je v `third_party/7-Zip/License.txt` a ve složce `Tools` (`7-Zip-License.txt`). Původ a otisk balíčku: `third_party/7-Zip/SOURCE.txt`.
+- Písmo MxPlus IBM VGA 8x16 (CC BY-SA 4.0), knihovny SharpCompress (MIT) a SharpZipLib (MIT).

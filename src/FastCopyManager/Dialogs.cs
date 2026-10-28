@@ -6,7 +6,7 @@ using System.Windows.Media;
 
 namespace FastCopyManager;
 
-public enum PackFormat { Zip, TarGz, Tar }
+public enum PackFormat { Zip, SevenZip, Rar, TarGz, Tar }
 
 /// <summary>Co si uživatel v dialogu Zabalit vybral. Name už obsahuje příponu podle formátu.</summary>
 public sealed record PackRequest(string Name, PackFormat Format, CompressionLevel Level, string? Password);
@@ -45,15 +45,22 @@ public sealed class PackDialog : Window
         DialogStyle.Apply(this, owner, Loc.T("Zabalit"), 560);
 
         _name.Text = baseName;
-        _format.ItemsSource = new[] { "ZIP", "TAR.GZ", "TAR" };
+        _format.ItemsSource = new[]
+        {
+            "ZIP",
+            ExternalTools.Find7z() is null ? "7z  (" + Loc.T("nenalezen 7-Zip") + ")" : "7z",
+            ExternalTools.FindRar() is null ? "RAR  (" + Loc.T("nenalezen WinRAR") + ")" : "RAR",
+            "TAR.GZ",
+            "TAR",
+        };
         _format.SelectedIndex = 0;
         _level.ItemsSource = new[] { Loc.T("Bez komprese"), Loc.T("Rychlá"), Loc.T("Normální"), Loc.T("Nejlepší") };
         _level.SelectedIndex = 1;
         _format.SelectionChanged += (_, _) =>
         {
-            var zip = _format.SelectedIndex == 0;
-            _password.IsEnabled = _repeat.IsEnabled = zip;
-            if (!zip) { _password.Clear(); _repeat.Clear(); }
+            var canEncrypt = (PackFormat)_format.SelectedIndex is PackFormat.Zip or PackFormat.SevenZip or PackFormat.Rar;
+            _password.IsEnabled = _repeat.IsEnabled = canEncrypt;
+            if (!canEncrypt) { _password.Clear(); _repeat.Clear(); }
         };
 
         var grid = new Grid { Margin = new Thickness(14) };
@@ -75,7 +82,7 @@ public sealed class PackDialog : Window
         Row(Loc.T("Název archivu:"), _name);
         Row(Loc.T("Formát:"), _format);
         Row(Loc.T("Komprese:"), _level);
-        Row(Loc.T("Heslo (jen ZIP, šifrování AES-256, nepovinné):"), _password);
+        Row(Loc.T("Heslo (nepovinné; ZIP, 7z a RAR, AES-256):"), _password);
         Row(Loc.T("Heslo znovu:"), _repeat);
 
         var ok = new Button { Content = "OK", Width = 90, IsDefault = true };
@@ -104,14 +111,27 @@ public sealed class PackDialog : Window
         }
 
         var format = (PackFormat)_format.SelectedIndex;
-        var password = format == PackFormat.Zip && _password.Password.Length > 0 ? _password.Password : null;
+        if (format == PackFormat.SevenZip && ExternalTools.Find7z() is null)
+        {
+            MessageBox.Show(this, Loc.T("Nenalezen 7-Zip (7z.exe). Nainstaluj 7-Zip nebo dej 7z.exe a 7z.dll do složky Tools vedle aplikace."),
+                Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (format == PackFormat.Rar && ExternalTools.FindRar() is null)
+        {
+            MessageBox.Show(this, Loc.T("RAR umí vytvářet jen WinRAR (Rar.exe, placený se zkušební dobou). Nainstaluj WinRAR nebo dej Rar.exe do složky Tools vedle aplikace."),
+                Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var canEncrypt = format is PackFormat.Zip or PackFormat.SevenZip or PackFormat.Rar;
+        var password = canEncrypt && _password.Password.Length > 0 ? _password.Password : null;
         if (password is not null && password != _repeat.Password)
         {
             MessageBox.Show(this, Loc.T("Hesla se neshodují."), Title, MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        var extension = format switch { PackFormat.Zip => ".zip", PackFormat.TarGz => ".tar.gz", _ => ".tar" };
+        var extension = format switch { PackFormat.Zip => ".zip", PackFormat.SevenZip => ".7z", PackFormat.Rar => ".rar", PackFormat.TarGz => ".tar.gz", _ => ".tar" };
         if (!name.EndsWith(extension, StringComparison.OrdinalIgnoreCase)) name += extension;
 
         var level = _level.SelectedIndex switch
