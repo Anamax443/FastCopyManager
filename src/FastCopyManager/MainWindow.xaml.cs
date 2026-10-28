@@ -36,6 +36,8 @@ public partial class MainWindow : Window
 
     private void BuildMenus()
     {
+        var view = new MenuEntry("View", "F3", () => View_Click(this, new RoutedEventArgs()));
+        var edit = new MenuEntry("Edit", "F4", () => Edit_Click(this, new RoutedEventArgs()));
         var copy = new MenuEntry("Copy", "F5", () => Copy_Click(this, new RoutedEventArgs()));
         var move = new MenuEntry("Rename or move", "F6", () => Move_Click(this, new RoutedEventArgs()));
         var pack = new MenuEntry("Pack to ZIP", "Alt-F5", () => Pack_Click(this, new RoutedEventArgs()));
@@ -51,7 +53,7 @@ public partial class MainWindow : Window
         _menus = new[]
         {
             new MenuDef("Left", new[] { driveL, refresh }),
-            new MenuDef("Files", new[] { copy, move, pack, join, mkdir, del, quit }),
+            new MenuDef("Files", new[] { view, edit, copy, move, pack, join, mkdir, del, quit }),
             new MenuDef("Disk", new[] { driveL, driveR }),
             new MenuDef("Commands", new[] { swap, refresh }),
             new MenuDef("Right", new[] { driveR, refresh }),
@@ -187,7 +189,9 @@ public partial class MainWindow : Window
     {
         var keys = new (string Num, string Label, Action? Act)[]
         {
-            ("1", "", null), ("2", "", null), ("3", "", null), ("4", "", null),
+            ("1", "", null), ("2", "", null),
+            ("3", "View", () => View_Click(this, new RoutedEventArgs())),
+            ("4", "Edit", () => Edit_Click(this, new RoutedEventArgs())),
             ("5", "Copy", () => Copy_Click(this, new RoutedEventArgs())),
             ("6", "RenMov", () => Move_Click(this, new RoutedEventArgs())),
             ("7", "Mkdir", () => MkDir_Click(this, new RoutedEventArgs())),
@@ -269,6 +273,8 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Tab: Switch_Click(this, e); break;
+            case Key.F3: View_Click(this, e); break;
+            case Key.F4: Edit_Click(this, e); break;
             case Key.F5: Copy_Click(this, e); break;
             case Key.F6: Move_Click(this, e); break;
             case Key.F7: MkDir_Click(this, e); break;
@@ -365,6 +371,25 @@ public partial class MainWindow : Window
 
         var source = _active;
         await RunOperation("Balím", false, (st, ct) => Task.Run(() => FileOps.PackZip(items, zipPath, st, ct), ct), items.Count, source);
+    }
+
+    private void View_Click(object sender, RoutedEventArgs e) => OpenViewer(edit: false);
+    private void Edit_Click(object sender, RoutedEventArgs e) => OpenViewer(edit: true);
+
+    private void OpenViewer(bool edit)
+    {
+        if (_active.InArchive) { StatusText.Text = "Soubory z archivu nejdřív rozbal (F5)."; return; }
+        if (_active.ListControl.SelectedItem is not FileItem { IsDir: false, IsParent: false } item) return;
+        try
+        {
+            new ViewerWindow(item.FullPath, edit, this).ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Chyba: " + ex.Message;
+        }
+        _active.Refresh();
+        _active.ListControl.Focus();
     }
 
     private async void Join_Click(object sender, RoutedEventArgs e)
