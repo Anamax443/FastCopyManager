@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using Media = System.Windows.Media;
 
 namespace FastCopyManager;
 
@@ -53,7 +54,10 @@ public partial class MainWindow : Window
 
     // ---- horní menu (F9 nebo klik) ----
 
-    private sealed record MenuEntry(string Label, string Hot, Action Act);
+    private sealed record MenuEntry(string Label, string Hot, Action Act, Func<bool>? Marked = null, bool IsSeparator = false)
+    {
+        public static MenuEntry Separator => new("", "", () => { }, null, true);
+    }
     private sealed record MenuDef(string Title, MenuEntry[] Items);
 
     private MenuDef[] _menus = Array.Empty<MenuDef>();
@@ -80,11 +84,20 @@ public partial class MainWindow : Window
 
         _menus = new[]
         {
-            new MenuDef("Left", new[] { new MenuEntry("Brief", "Ctrl-F1", () => LeftPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F1", () => LeftPanel.SetBrief(false)) }.Concat(SortEntries(LeftPanel)).Concat(new[] { driveL, refresh }).ToArray()),
-            new MenuDef("Files", new[] { help, view, edit, copy, move, unpack, pack, join, mkdir, del, quit }),
-            new MenuDef("Disk", new[] { driveL, driveR }),
-            new MenuDef("Commands", new[] { swap, refresh, new MenuEntry("Language CS/EN", "Ctrl-L", ToggleLanguage), new MenuEntry("Clear queue", "Shift-Esc", ClearQueue) }),
-            new MenuDef("Right", new[] { new MenuEntry("Brief", "Ctrl-F2", () => RightPanel.SetBrief(true)), new MenuEntry("Full", "Ctrl-F2", () => RightPanel.SetBrief(false)) }.Concat(SortEntries(RightPanel)).Concat(new[] { driveR, refresh }).ToArray()),
+            new MenuDef("Left", PanelMenu(LeftPanel, driveL, refresh, "Ctrl-F1")),
+            new MenuDef("Files", new[] { help, view, edit, copy, move, mkdir, del, MenuEntry.Separator, unpack, pack, join, MenuEntry.Separator, quit }),
+            new MenuDef("Disk", new[]
+            {
+                new MenuEntry("Left drive...", "Alt-F1", () => ChangeDrive(LeftPanel)),
+                new MenuEntry("Right drive...", "Alt-F2", () => ChangeDrive(RightPanel)),
+            }),
+            new MenuDef("Commands", new[]
+            {
+                swap, refresh, MenuEntry.Separator,
+                new MenuEntry("Language CS/EN", "Ctrl-L", ToggleLanguage),
+                new MenuEntry("Clear queue", "Shift-Esc", ClearQueue),
+            }),
+            new MenuDef("Right", PanelMenu(RightPanel, driveR, refresh, "Ctrl-F2")),
         };
 
         for (var i = 0; i < _menus.Length; i++)
@@ -107,12 +120,25 @@ public partial class MainWindow : Window
 
     private static MenuEntry[] SortEntries(FilePanel panel) => new[]
     {
-        new MenuEntry("Name", "Ctrl-F3", () => panel.SetSort(SortMode.Name)),
-        new MenuEntry("Extension", "Ctrl-F4", () => panel.SetSort(SortMode.Extension)),
-        new MenuEntry("Time", "Ctrl-F5", () => panel.SetSort(SortMode.Time)),
-        new MenuEntry("Size", "Ctrl-F6", () => panel.SetSort(SortMode.Size)),
-        new MenuEntry("Unsorted", "Ctrl-F7", () => panel.SetSort(SortMode.Unsorted)),
+        new MenuEntry("Name", "Ctrl-F3", () => panel.SetSort(SortMode.Name), () => panel.Sort == SortMode.Name),
+        new MenuEntry("Extension", "Ctrl-F4", () => panel.SetSort(SortMode.Extension), () => panel.Sort == SortMode.Extension),
+        new MenuEntry("Time", "Ctrl-F5", () => panel.SetSort(SortMode.Time), () => panel.Sort == SortMode.Time),
+        new MenuEntry("Size", "Ctrl-F6", () => panel.SetSort(SortMode.Size), () => panel.Sort == SortMode.Size),
+        new MenuEntry("Unsorted", "Ctrl-F7", () => panel.SetSort(SortMode.Unsorted), () => panel.Sort == SortMode.Unsorted),
     };
+
+    private static MenuEntry[] PanelMenu(FilePanel panel, MenuEntry drive, MenuEntry refresh, string key) =>
+        new[]
+        {
+            new MenuEntry("Brief", key, () => panel.SetBrief(true), () => panel.Brief),
+            new MenuEntry("Full", key, () => panel.SetBrief(false), () => !panel.Brief),
+            MenuEntry.Separator,
+        }
+        .Concat(SortEntries(panel))
+        .Append(MenuEntry.Separator)
+        .Append(refresh)
+        .Append(drive)
+        .ToArray();
 
     private void OpenMenu(int index)
     {
@@ -125,30 +151,73 @@ public partial class MainWindow : Window
         MenuPopup.IsOpen = true;
     }
 
-    private void RenderMenu()
+    private static readonly Media.Brush MenuYellow = new Media.SolidColorBrush(Media.Color.FromRgb(0xFF, 0xFF, 0x55));
+
+    /// <summary>Pro každou položku najde první dosud nepoužité písmeno názvu jako zkratku (žlutě).</summary>
+    private static int[] HotPositions(MenuEntry[] items)
     {
-        var teal = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x00, 0xAA, 0xAA));
-        var stack = new StackPanel { MinWidth = 280 };
-        var items = _menus[_menuIndex].Items;
+        var used = new HashSet<char>();
+        var positions = new int[items.Length];
         for (var i = 0; i < items.Length; i++)
         {
-            var idx = i;
-            var row = new DockPanel
+            positions[i] = -1;
+            if (items[i].IsSeparator) continue;
+            for (var c = 0; c < items[i].Label.Length; c++)
             {
-                Background = i == _menuItem ? System.Windows.Media.Brushes.Black : teal,
-                Margin = new Thickness(0),
-            };
-            var fg = i == _menuItem ? System.Windows.Media.Brushes.White : System.Windows.Media.Brushes.Black;
-            var hot = new TextBlock { Text = items[i].Hot + " ", Foreground = fg };
-            DockPanel.SetDock(hot, Dock.Right);
-            row.Children.Add(hot);
-            row.Children.Add(new TextBlock { Text = " " + items[i].Label, Foreground = fg });
+                var ch = char.ToUpperInvariant(items[i].Label[c]);
+                if (!char.IsLetter(ch) || !used.Add(ch)) continue;
+                positions[i] = c;
+                break;
+            }
+        }
+        return positions;
+    }
+
+    private void RenderMenu()
+    {
+        var stack = new StackPanel { MinWidth = 300 };
+        var items = _menus[_menuIndex].Items;
+        var hot = HotPositions(items);
+        for (var i = 0; i < items.Length; i++)
+        {
+            var item = items[i];
+            if (item.IsSeparator)
+            {
+                stack.Children.Add(new Border { Height = 1, Background = Media.Brushes.Black, Margin = new Thickness(4, 4, 4, 4) });
+                continue;
+            }
+
+            var idx = i;
+            var selected = i == _menuItem;
+            var row = new DockPanel { Background = selected ? Media.Brushes.Black : FkTeal };
+            var fg = selected ? Media.Brushes.White : Media.Brushes.Black;
+
+            var marker = new TextBlock { Text = item.Marked?.Invoke() == true ? "» " : "  ", Foreground = fg };
+            DockPanel.SetDock(marker, Dock.Left);
+            var shortcut = new TextBlock { Text = item.Hot + " ", Foreground = fg };
+            DockPanel.SetDock(shortcut, Dock.Right);
+            var label = new TextBlock { Foreground = fg };
+            var p = hot[i];
+            if (p < 0)
+            {
+                label.Inlines.Add(item.Label);
+            }
+            else
+            {
+                label.Inlines.Add(item.Label[..p]);
+                label.Inlines.Add(new System.Windows.Documents.Run(item.Label[p].ToString()) { Foreground = MenuYellow });
+                label.Inlines.Add(item.Label[(p + 1)..]);
+            }
+
+            row.Children.Add(marker);
+            row.Children.Add(shortcut);
+            row.Children.Add(label);
             row.MouseLeftButtonUp += (_, _) => ExecuteMenu(idx);
             stack.Children.Add(row);
         }
         MenuPopup.Child = new Border
         {
-            Background = teal, BorderBrush = System.Windows.Media.Brushes.Black, BorderThickness = new Thickness(2), Child = stack,
+            Background = FkTeal, BorderBrush = Media.Brushes.Black, BorderThickness = new Thickness(2), Child = stack,
         };
     }
 
@@ -181,20 +250,40 @@ public partial class MainWindow : Window
         }
     }
 
+    private static int NextMenuItem(MenuEntry[] items, int from, int direction)
+    {
+        var i = from;
+        do { i = (i + direction + items.Length) % items.Length; } while (items[i].IsSeparator);
+        return i;
+    }
+
     private bool HandleMenuKey(Key key)
     {
         var items = _menus[_menuIndex].Items;
+        var first = Array.FindIndex(items, i => !i.IsSeparator);
         switch (key)
         {
-            case Key.Up: if (_menuItem == 0) CloseMenu(true); else { _menuItem--; RenderMenu(); } break;
-            case Key.Down: _menuItem = (_menuItem + 1) % items.Length; RenderMenu(); break;
+            case Key.Up:
+                if (_menuItem == first) CloseMenu(true);
+                else { _menuItem = NextMenuItem(items, _menuItem, -1); RenderMenu(); }
+                break;
+            case Key.Down: _menuItem = NextMenuItem(items, _menuItem, 1); RenderMenu(); break;
             case Key.Left: OpenMenu(_menuIndex - 1); break;
             case Key.Right: OpenMenu(_menuIndex + 1); break;
             case Key.Enter: ExecuteMenu(_menuItem); break;
             case Key.Escape or Key.F9: CloseMenu(false); break;
-            default: return true;   // při otevřeném menu ostatní klávesy nepouštíme dál
+            case >= Key.A and <= Key.Z:
+                var hot = HotPositions(items);
+                var letter = (char)('A' + (key - Key.A));
+                for (var i = 0; i < items.Length; i++)
+                {
+                    if (hot[i] < 0 || char.ToUpperInvariant(items[i].Label[hot[i]]) != letter) continue;
+                    ExecuteMenu(i);
+                    break;
+                }
+                break;
         }
-        return true;
+        return true;   // při otevřeném menu ostatní klávesy nepouštíme dál
     }
 
     // ---- zóny: panely, horní menu, příkazový řádek, dolní lišta (šipky mezi nimi) ----
