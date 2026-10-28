@@ -35,12 +35,13 @@ public partial class MainWindow : Window
         CommandBox.GotKeyboardFocus += (_, _) => SetZone(Zone.CommandLine);
         PreviewMouseDown += Window_PreviewMouseDown;
         PreviewTextInput += Window_PreviewTextInput;
-        PreviewKeyUp += (_, e) =>
-        {
-            if (e.Key == Key.System && e.SystemKey is Key.LeftAlt or Key.RightAlt) SetFKeyLabels(false);
-        };
+        PreviewKeyUp += Window_PreviewKeyUp;
         Activated += (_, _) => SetFKeyLabels(Keyboard.Modifiers.HasFlag(ModifierKeys.Alt));
-        Deactivated += (_, _) => { if (MenuPopup.IsOpen) CloseMenu(false); };
+        Deactivated += (_, _) =>
+        {
+            _altAlone = false;
+            if (MenuPopup.IsOpen) CloseMenu(false);
+        };
         Activated += (_, _) =>
         {
             if (!_refreshOnActivate || _busy) return;
@@ -403,6 +404,43 @@ public partial class MainWindow : Window
         return false;
     }
 
+    // ---- samotné klepnutí na Alt = horní menu (jako ve Windows); Alt+jiná klávesa funguje jako dřív ----
+
+    private bool _altAlone;
+
+    private void AltPressed(bool repeat)
+    {
+        SetFKeyLabels(true);
+        if (!repeat) _altAlone = true;
+    }
+
+    /// <summary>Vrací true, když šlo o samotné klepnutí na Alt a okno ho zpracovalo.</summary>
+    private bool AltReleased()
+    {
+        SetFKeyLabels(false);
+        if (!_altAlone) return false;
+        _altAlone = false;
+        if (MenuPopup.IsOpen) CloseMenu(false);
+        else if (_zone == Zone.MenuBar) FocusPanels();
+        else EnterMenuBar();
+        return true;
+    }
+
+    private void Window_PreviewKeyUp(object sender, KeyEventArgs e)
+    {
+        // Handled zabrání systému, aby po puštění Alt aktivoval systémové menu okna.
+        if (e.Key == Key.System && e.SystemKey is Key.LeftAlt or Key.RightAlt && AltReleased()) e.Handled = true;
+    }
+
+    /// <summary>Alt+šipka nahoru: do horní lišty menu odkudkoli (panel, příkazový řádek, dolní lišta).</summary>
+    private void EnterMenuBar()
+    {
+        if (MenuPopup.IsOpen) return;
+        if (_zone != Zone.MenuBar) _menuBarIndex = _active == LeftPanel ? 0 : _menus.Length - 1;
+        MenuBar.Focus();
+        SetZone(Zone.MenuBar);
+    }
+
     private void MoveMenuBar(int delta)
     {
         _menuBarIndex = (_menuBarIndex + delta + _menus.Length) % _menus.Length;
@@ -650,7 +688,8 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.System && e.SystemKey is Key.LeftAlt or Key.RightAlt) SetFKeyLabels(true);
+        if (e.Key == Key.System && e.SystemKey is Key.LeftAlt or Key.RightAlt) AltPressed(e.IsRepeat);
+        else _altAlone = false;
         if (MenuPopup.IsOpen)
         {
             HandleMenuKey(e.Key);
@@ -702,6 +741,12 @@ public partial class MainWindow : Window
             {
                 _stats?.TogglePause();
             }
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.System && e.SystemKey == Key.Up)
+        {
+            EnterMenuBar();
             e.Handled = true;
             return;
         }

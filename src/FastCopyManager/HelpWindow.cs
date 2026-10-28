@@ -33,6 +33,7 @@ Ctrl+R      Znovu načíst
 Ctrl+L      Jazyk CS / EN
 
 Tab         Druhý panel (také šipky vlevo / vpravo)
+Alt (klepnout) nebo Alt+Nahoru   Horní menu odkudkoli (znovu Alt = zpět)
 Šipka nahoru z prvního řádku   horní menu (Enter rozbalí, šipka dolů zpět do panelu)
 Šipka dolů z posledního řádku  příkazový řádek a dolní lišta
 Enter       Otevřít složku; na .zip .rar .7z .tar otevře archiv jako složku
@@ -68,6 +69,7 @@ Ctrl+R      Re-read
 Ctrl+L      Language CS / EN
 
 Tab         Other panel (also Left / Right arrows)
+Alt (tap) or Alt+Up   Top menu from anywhere (Alt again = back)
 Up arrow on the first row    top menu (Enter opens it, Down returns to the panel)
 Down arrow on the last row   command line and bottom bar
 Enter       Open a folder; on .zip .rar .7z .tar opens the archive like a folder
