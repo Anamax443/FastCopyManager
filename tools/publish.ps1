@@ -1,9 +1,10 @@
+# Přenosný (self-contained) build pro flashku; na cílovém PC není potřeba .NET.
 # Publikuje FastCopyManager a podepíše exe self-signed certifikátem (jen pro vlastní stroje).
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $out  = Join-Path $root 'publish'
 
-dotnet publish "$root\src\FastCopyManager\FastCopyManager.csproj" -c Release -r win-x64 --self-contained false -o $out
+dotnet publish "$root\src\FastCopyManager\FastCopyManager.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o $out
 
 $subject = 'CN=FastCopyManager (AXIMA)'
 $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object Subject -eq $subject | Select-Object -First 1
