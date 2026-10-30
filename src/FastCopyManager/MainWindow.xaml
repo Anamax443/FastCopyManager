@@ -28,6 +28,22 @@
         <local:FilePanel x:Name="LeftPanel" Grid.Row="1" Grid.Column="0" Margin="0,0,1,0"/>
         <local:FilePanel x:Name="RightPanel" Grid.Row="1" Grid.Column="1" Margin="1,0,0,0"/>
 
+        <!-- okno průběhu operace uprostřed jako v Norton Commanderu -->
+        <Border x:Name="ProgressBox" Grid.Row="1" Grid.ColumnSpan="2" Visibility="Collapsed" Width="560"
+                HorizontalAlignment="Center" VerticalAlignment="Center" Background="#FF00AAAA"
+                BorderBrush="#FF55FFFF" BorderThickness="2" Padding="14,8">
+            <StackPanel>
+                <TextBlock x:Name="ProgTitle" Foreground="#FFFFFF55" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                <TextBlock x:Name="ProgDetail" Foreground="Black" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="ProgFile" Foreground="White" TextTrimming="CharacterEllipsis" Margin="0,4,0,6"/>
+                <Border Background="#FF0000AA" Height="20" BorderBrush="Black" BorderThickness="1">
+                    <Border x:Name="ProgFill" Background="#FFFFFF55" HorizontalAlignment="Left" Width="0"/>
+                </Border>
+                <TextBlock x:Name="ProgStats" Foreground="Black" Margin="0,6,0,0" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="ProgKeys" Foreground="White" Margin="0,4,0,0" HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
         <DockPanel Grid.Row="2" Grid.ColumnSpan="2" Margin="4,0">
             <TextBlock DockPanel.Dock="Top" x:Name="QueueText" Visibility="Collapsed" Foreground="#FFFFFF55"
                        TextTrimming="CharacterEllipsis" Margin="2,2,2,2"/>

@@ -910,7 +910,7 @@ public partial class MainWindow : Window
         {
             Enqueue(move ? Loc.T("Přesouvám") : Loc.T("Kopíruji"), opt.Verify, async (st, ct) =>
             {
-                await FileOps.CopyAsync(items, dest, opt, st, ct);
+                await Task.Run(() => FileOps.CopyAsync(items, dest, opt, st, ct), ct);
                 if (move) await Task.Run(() => FileOps.Delete(items, recycle: false));
             }, items.Count, source, Describe(items, dest));
         }
@@ -1182,9 +1182,17 @@ public partial class MainWindow : Window
             lastDone = done; lastSec = sec;
             var total = Math.Max(stats.Total, 1);
             var left = speed > 1 ? TimeSpan.FromSeconds((total - done) / speed) : TimeSpan.Zero;
+            ProgTitle.Text = (stats.Paused ? Loc.T("[PAUZA] ") : "") + verb;
+            ProgDetail.Text = _currentJob?.Detail ?? "";
+            ProgFile.Text = Path.GetFileName(stats.Current);
+            ProgFill.Width = Math.Max(0, ProgFill.Parent is FrameworkElement pb ? (pb.ActualWidth - 2) * Math.Min(1.0, (double)done / total) : 0);
+            ProgStats.Text = $"{100.0 * done / total:0}%   {speed / 1048576:0} MB/s   " + Loc.T("zbývá") + $" {left:mm\\:ss}" + (_queue.Count > 0 ? "   [" + Loc.T("ve frontě") + ": " + _queue.Count + "]" : "");
             StatusText.Text = (stats.Paused ? Loc.T("[PAUZA] ") : "") + $"{verb}: {Path.GetFileName(stats.Current)}  {100.0 * done / total:0}%  {speed / 1048576:0} MB/s  " + Loc.T("zbývá") + $" {left:mm\\:ss}  " + Loc.T("(P = pauza, Esc = zrušit)") + (_queue.Count > 0 ? "  [" + Loc.T("ve frontě") + ": " + _queue.Count + "]" : "");
         };
         timer.Start();
+        ProgKeys.Text = Loc.T("(P = pauza, Esc = zrušit)");
+        ProgFill.Width = 0;
+        ProgressBox.Visibility = Visibility.Visible;
 
         try
         {
@@ -1204,6 +1212,7 @@ public partial class MainWindow : Window
         finally
         {
             timer.Stop();
+            ProgressBox.Visibility = Visibility.Collapsed;
             _busy = false;
             _cts = null;
             LeftPanel.Refresh();
